@@ -74,10 +74,16 @@ export function expandEnvVars(value, { env = process.env, projectDir, pluginRoot
 
 // ─── server naming ──────────────────────────────────────────────────────────
 
-/** `plugin_<plugin>_<server>` with Claude Code's illegal characters replaced. */
+/**
+ * `plugin_<plugin>_<server>` with Claude Code's illegal characters replaced.
+ *
+ * Claude Code names a plugin server's tools `mcp__plugin_<plugin>_<server>__<tool>`
+ * and permission rules / hook matchers are written against that exact name, so
+ * the `plugin_` segment is part of the contract, not decoration.
+ */
 export function pluginServerName(pluginName, serverKey) {
   const clean = (v) => String(v ?? '').replace(/[^A-Za-z0-9_-]/g, '_');
-  return `${clean(pluginName)}_${clean(serverKey)}`;
+  return `plugin_${clean(pluginName)}_${clean(serverKey)}`;
 }
 
 /**

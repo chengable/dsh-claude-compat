@@ -63,8 +63,8 @@ test('expandEnvVars: remote strings blank the credentials Claude Code hides', ()
 // ─── naming ────────────────────────────────────────────────────────────────
 
 test('server names: plugin namespacing and collision-free truncation', () => {
-  assert.equal(pluginServerName('claude-mem', 'mcp-search'), 'claude-mem_mcp-search');
-  assert.equal(pluginServerName('my plugin!', 'search'), 'my_plugin__search');
+  assert.equal(pluginServerName('claude-mem', 'mcp-search'), 'plugin_claude-mem_mcp-search');
+  assert.equal(pluginServerName('my plugin!', 'search'), 'plugin_my_plugin__search');
 
   const long = 'a'.repeat(40);
   const other = `${'a'.repeat(39)}b`;
@@ -174,7 +174,7 @@ test('translatePluginMcp: namespaces servers, substitutes the root, and injects 
   const { servers, warns } = translatePluginMcp(
     { name: 'claude-mem' }, installPath, { pluginName: 'claude-mem' });
   assert.deepEqual(warns, []);
-  assert.equal(servers[0].serverName, 'claude-mem_search');
+  assert.equal(servers[0].serverName, 'plugin_claude-mem_search');
   assert.equal(servers[0].command, `${installPath}/bin/srv`);
   assert.equal(servers[0].env.CLAUDE_PLUGIN_ROOT, installPath);
   assert.equal(servers[0].env.KEEP, '1');
