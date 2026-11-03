@@ -4,6 +4,11 @@ English | [简体中文](CHANGELOG.zh-CN.md)
 
 All notable changes to this project are documented here. Versions follow [SemVer](https://semver.org/).
 
+## [1.1.7] — 2026-11-03
+
+### Changed
+- **Rolled back the "show hook output on screen" work.** The chat view renders the human's messages, the model's replies and tool cards only — there is no plugin-facing channel for extra text (no toast API either). Attempts to reach it (buffered notices, persisted queues, a surface append, `form` juggling, and finally asking the model to quote the text) all added machinery for something the page cannot show, and the model-quoting variant changed the model's replies. Removed: `hookOutputMode`, `surfaceHookOutput`, the notice queue and its persistence, and the model-echo instruction. A hook's own stdout / `systemMessage` is logged only (`dsh-claude-compat: <event> hook output: …`). Decisions and `additionalContext` keep their real channels and are unaffected — which is what hooks are actually for (e.g. agent-morph's Stop guard).
+
 ## [1.1.6] — 2026-11-03
 
 ### Changed

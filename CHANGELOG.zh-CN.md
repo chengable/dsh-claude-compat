@@ -4,6 +4,11 @@
 
 本项目所有重要变更记录于此。版本遵循 [SemVer](https://semver.org/)。
 
+## [1.1.7] — 2026-11-03
+
+### 变更
+- **回退了“把 hook 输出显示到页面上”的那套工作。** 会话页只渲染用户消息、模型回复与工具卡片 —— 插件没有多余文本的展示通道（也没有 toast API）。为此做过的尝试（缓冲提示、落盘队列、直接 append 到 surface、折腾 `form`、最后让模型转述）都是给一个页面本来就显示不了的东西堆机器，而且“让模型转述”还改变了模型的回复。已删除：`hookOutputMode`、`surfaceHookOutput`、提示队列与其落盘、以及让模型引用的指令。hook 自身的 stdout / `systemMessage` 现在只写日志（`dsh-claude-compat: <event> hook output: …`）。决策与 `additionalContext` 保留原有通道、不受影响 —— 这才是 hook 的真正用途（例如 agent-morph 的 Stop 守卫）。
+
 ## [1.1.6] — 2026-11-03
 
 ### 变更

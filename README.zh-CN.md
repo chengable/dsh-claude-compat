@@ -119,8 +119,6 @@ dsh plugin --profile web add github:biedongbin/dsh-claude-compat
 | `mcpFailOnStartupError` | `false` | 转发给 `dsh-mcp-client`：MCP 服务器连接失败时让插件启动失败 |
 | `enableHooks` | `true` | 运行 Claude Code hooks（settings 文件，以及每个已安装插件的 `hooks/hooks.json`） |
 | `enablePluginHooks` | `true` | 运行插件自带的 hooks（设为 `false` 则只跑 settings 文件里的） |
-| `surfaceHookOutput` | `true` | 把 hook 的输出（Stop hook 的 stdout / `systemMessage`）作为提示消息在下一条 prompt 里显示到会话中 |
-| `hookOutputMode` | `model` | hook 自身输出去哪：`model`（让模型在回复里引用，页面唯一会渲染的通道）、`context`（只进模型上下文）、`off`（丢弃） |
 | `hooksTimeoutMs` | `60000` | 单个 hook 运行超时（UserPromptSubmit 无论如何上限 10s） |
 | `enableAgents` | `true` | 把 `.claude/agents/*.md` 暴露为委派 shim skill |
 | `skillAliases` | `{}` | 非 kebab 名（中文等）→ ASCII slug 的映射，如 `{ "三脑": "san-nao" }`。见下方「中文 / 非 ASCII 技能名」 |
@@ -168,6 +166,8 @@ skillAliases:
 - 没配映射的非 kebab 名不再静默消失：每个文件每进程告警一次，并直接给出可粘贴的映射示例。
 
 ## 已知限制
+
+- **hook 自身的 stdout / `systemMessage` 不会显示在页面上。** DSH 的会话页只渲染用户消息、模型回复与工具卡片，插件注入的消息只进模型上下文。这类文本只写日志（`dsh-claude-compat: <event> hook output: …`），不另做展示；真正生效的是决策（`deny`/`ask`/`block`）与 `additionalContext`。
 
 以下是 Claude Code 有、但当前 DSH 没有承载面的能力。写在这里，避免被当成 bug：
 

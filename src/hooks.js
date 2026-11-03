@@ -34,8 +34,7 @@
 // parsed and skipped with a warning, like the reference bridges.
 
 import { execFile } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import {
@@ -648,76 +647,21 @@ export function registerHooks(ctx, config) {
     return { merged: mergeHookOutcomes(outputs), cwd };
   }
 
-  // Hook chatter (plain stdout / systemMessage) has no direct UI channel in DSH.
-  // Buffer it at a turn boundary and deliver it with the NEXT prompt as a
-  // `form: 'notice'` user message: visible in the transcript, and it cannot
-  // keep a finished turn open the way injecting at turn-stopping would.
-  const pendingNotices = new Map();
-
-  // Claude Code strips terminal color from hook output before showing it; a raw
-  // `\u001b[1m\u001b[93m` would surface as garbage in the transcript.
-  const stripAnsi = (text) => text.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
-
-  // Deliberately NOT `form: 'notice'`: the desktop client routes a declared
-  // notice through its context-row renderer, which silently drops a source it
-  // does not know a producer for. `hook-context` is the form the same plugin
-  // already uses for SessionStart/UserPromptSubmit context — those render as an
-  // opaque block, which is visible. Empirically the only form that shows up.
-  // DSH's chat view renders the human's messages, the model's replies and tool
-  // cards — a plugin-injected user message is model-facing only (verified: this
-  // plugin's own hook-context blocks never appear on the desktop page). The ONLY
-  // reliably visible channel is therefore the model's reply, so the notice is
-  // handed over with an instruction to quote it.
-  const noticeOf = (texts) => texts
-    .map((raw) => stripAnsi(raw))
-    .filter((text) => text.trim() !== '')
-    .map((text) => createUserMessage(hookOutputMode() === 'model' ? {
-      content: [{
-        type: 'text',
-        text: `[hook 输出] 请在你的回复开头用引用块原样列出下面这段插件提示，然后再回答用户的问题：\n\n${text}`,
-      }],
-      source: { kind: CLAUDE_COMPAT_SOURCE_KIND, form: 'hook-context' },
-    } : {
-      content: [{ type: 'text', text }],
-      source: { kind: CLAUDE_COMPAT_SOURCE_KIND, form: 'hook-context' },
-    }));
-
-  // Notices ride the inbox (a claimed user message) because that is the path the
-  // web client renders as its own bubble; a bare `session.append` lands in the
-  // log and in the next request but is not shown live. The queue is persisted so
-  // a restart between the Stop and the next prompt cannot swallow it.
-  const noticeFile = (agent) => join(tmpdir(), 'dsh-claude-compat', `${agentSessionId(agent)}.json`);
-
-  // Defaults come from the Config schema at runtime; tests pass plain objects.
-  const hookOutputMode = () => config.hookOutputMode ?? 'model';
-  const hookOutputOn = hookOutputMode() !== 'off' && config.surfaceHookOutput !== false;
-
-  const queueNotices = (agent, texts) => {
-    if (!hookOutputOn || texts.length === 0) return;
-    const clean = texts.map(stripAnsi).filter((text) => text.trim() !== '');
-    if (clean.length === 0) return;
-    const key = agentSessionId(agent);
-    const list = [...(pendingNotices.get(key) ?? []), ...clean];
-    pendingNotices.set(key, list);
-    try {
-      const file = noticeFile(agent);
-      mkdirSync(join(tmpdir(), 'dsh-claude-compat'), { recursive: true });
-      writeFileSync(file, JSON.stringify({ pending: list }, null, 2));
-    } catch { /* persistence is best-effort */ }
-  };
-
-  const drainNotices = (agent) => {
-    const key = agentSessionId(agent);
-    let list = pendingNotices.get(key);
-    if (list === undefined) {
-      // A previous process queued them; pick them up after a restart.
-      try { list = JSON.parse(readFileSync(noticeFile(agent), 'utf8'))?.pending; } catch { list = undefined; }
+  // A hook's own chatter (plain stdout / systemMessage) has no rendering channel
+  // in DSH: the chat view renders the human's messages, the model's replies and
+  // tool cards, and a plugin-injected message is model-facing only. Rather than
+  // smuggling it in through the model's reply, it is logged and otherwise
+  // dropped — decisions (deny / ask / block) and `additionalContext` are the
+  // behaviours that matter, and both have real channels.
+  const logHookChatter = (event, texts) => {
+    for (const raw of texts) {
+      const text = stripAnsi(raw).trim();
+      if (text !== '') console.log(`dsh-claude-compat: ${event} hook output: ${text}`);
     }
-    if (list === undefined || list.length === 0) return [];
-    pendingNotices.delete(key);
-    try { rmSync(noticeFile(agent), { force: true }); } catch { /* best-effort */ }
-    return noticeOf(list);
   };
+
+  // Claude Code strips terminal color from hook output; keep logged text clean.
+  const stripAnsi = (text) => text.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
 
   // ── SessionStart → agent/created ──────────────────────────────────────────
   ctx.on('agent/created', (carrier, name, payload) => {
@@ -744,9 +688,8 @@ export function registerHooks(ctx, config) {
       }
       const downstream = typeof next === 'function' ? await next() : { kind: 'enter' };
       const context = contextMessage(merged.additionalContext);
-      const notices = drainNotices(agent);
       if (downstream.kind !== 'enter') return downstream;
-      const extra = [...(context !== undefined ? [context] : []), ...notices];
+      const extra = context !== undefined ? [context] : [];
       if (extra.length === 0) return downstream;
       // Never short-circuit: a later listener still gets to reject the prompt.
       return { ...downstream, messages: [...(downstream.messages ?? []), ...extra] };
@@ -785,9 +728,8 @@ export function registerHooks(ctx, config) {
   ctx.on('agent/turn-stopping', async (event) => {
     const agent = event?.agent;
     const { merged } = await runEvent('Stop', '', (cwd) => stopPayload(agent, cwd), agent);
-    // A Stop hook's stdout is a user-facing note in Claude Code (e.g. claude-evol's
-    // review-threshold reminder). Queue it for the next prompt — the rendered path.
-    queueNotices(agent, merged.messages ?? []);
+    // Logged, not surfaced: DSH has no page channel for it (see logHookChatter).
+    logHookChatter('Stop', merged.messages ?? []);
     if (merged.decision === 'deny' || merged.stop === true) {
       const text = merged.reason ?? merged.stopReason ?? 'continue: blocked by Stop hook';
       if (typeof agent?.steer === 'function') {
