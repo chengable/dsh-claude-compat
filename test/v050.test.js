@@ -1,11 +1,14 @@
-// v0.5.0 focused self-check: plugin-marketplace support. Real-data based —
-// hits the actual ~/.claude/plugins installs on this machine (omc etc.), plus
-// synthetic fixtures for the manifest-less fallback, plugin MCP translation,
-// and project-wins collision.
+// v0.5.0 focused self-check: plugin-marketplace support. Every case runs on a
+// synthetic fixture under a tmp dir — a plugins root shaped exactly like the one
+// Claude Code writes (<root>/installed_plugins.json plus
+// <root>/cache/<marketplace>/<name>/<version>) and a plugin laying out
+// skills/commands/agents. Nothing here reads this machine's real ~/.claude
+// installs, so the suite passes on any machine and does not rot when a plugin
+// upgrades or is uninstalled.
 
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
-import { tmpdir, homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { Context } from '@deepseek-ai/cordis';
@@ -21,19 +24,51 @@ function makeSandbox(prefix) {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
-// ─── readInstalledClaudePlugins (real data) ──────────────────────────────────
+// Fixture writers: the on-disk shapes Claude Code plugins ship.
+function writeSkill(parentDir, name, description = `${name} skill`) {
+  const dir = join(parentDir, name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'SKILL.md'), `---\nname: ${name}\ndescription: ${description}\n---\nbody of ${name}\n`);
+}
 
-test('readInstalledClaudePlugins: real ~/.claude/plugins registry', () => {
-  const plugins = readInstalledClaudePlugins();
+function writeCommand(parentDir, name, description = `${name} command`) {
+  mkdirSync(parentDir, { recursive: true });
+  writeFileSync(join(parentDir, `${name}.md`), `---\ndescription: ${description}\n---\nrun ${name}\n`);
+}
+
+function writeAgent(parentDir, name, description = `${name} agent`) {
+  mkdirSync(parentDir, { recursive: true });
+  writeFileSync(join(parentDir, `${name}.md`), `---\nname: ${name}\ndescription: ${description}\n---\nbody of ${name}\n`);
+}
+
+// ─── readInstalledClaudePlugins (synthetic registry) ─────────────────────────
+
+test('readInstalledClaudePlugins: parses a Claude Code plugins registry', () => {
+  const root = makeSandbox('dcc-registry-');
+  // The layout Claude Code creates: installs live under
+  // <pluginsRoot>/cache/<marketplace>/<name>/<version>, keyed name@marketplace.
+  const omcVersion = '4.15.7';
+  const omcPath = join(root, 'cache', 'omc', 'oh-my-claudecode', omcVersion);
+  const otherPath = join(root, 'cache', 'mk', 'other-plug', '2.1.0');
+  mkdirSync(omcPath, { recursive: true });
+  mkdirSync(otherPath, { recursive: true });
+  writeFileSync(join(root, 'installed_plugins.json'), JSON.stringify({
+    version: 2,
+    plugins: {
+      'oh-my-claudecode@omc': [{ scope: 'user', installPath: omcPath, version: omcVersion }],
+      'other-plug@mk': [{ scope: 'user', installPath: otherPath, version: '2.1.0' }],
+    },
+  }));
+
+  const plugins = readInstalledClaudePlugins(root);
   assert.ok(plugins.length >= 2, `expected ≥2 plugins, got ${plugins.length}`);
   const omc = plugins.find((p) => p.name === 'oh-my-claudecode');
   assert.ok(omc, 'oh-my-claudecode present');
   assert.equal(omc.marketplace, 'omc');
-  // Version is whatever the machine has installed — assert the shape, not a
-  // pinned release (a pinned one breaks on every omc upgrade).
+  // Version is whatever the registry records — assert the shape, not a pinned
+  // release (a pinned one breaks on every plugin upgrade).
   assert.match(omc.version, /^\d+\.\d+\.\d+/);
-  assert.equal(omc.installPath,
-    join(homedir(), `.claude/plugins/cache/omc/oh-my-claudecode/${omc.version}`));
+  assert.equal(omc.installPath, join(root, 'cache/omc/oh-my-claudecode', omc.version));
   // every entry carries the 5 fields
   for (const p of plugins) {
     for (const k of ['key', 'name', 'marketplace', 'installPath', 'version']) {
@@ -41,25 +76,78 @@ test('readInstalledClaudePlugins: real ~/.claude/plugins registry', () => {
     }
   }
   // malformed / missing → []
+  assert.deepEqual(readInstalledClaudePlugins(join(root, 'does-not-exist')), []);
   assert.deepEqual(readInstalledClaudePlugins('/nonexistent-dcc-plugins'), []);
+
+  // Registry edge cases: reinstall records are appended, so the LAST user-scope
+  // entry is the live one; project-scope records belong to another scope and are
+  // skipped; a record set that is not an array, or an entry with no installPath,
+  // is dropped rather than surfacing a plugin with nowhere to read from.
+  writeFileSync(join(root, 'installed_plugins.json'), JSON.stringify({
+    version: 2,
+    plugins: {
+      're@mk': [
+        { scope: 'user', installPath: '/stale/re/1.0.0', version: '1.0.0' },
+        { scope: 'project', installPath: '/project/re', version: '9.0.0' },
+        { scope: 'user', installPath: '/fresh/re/2.0.0', version: '2.0.0' },
+      ],
+      'no-install-path@mk': [{ scope: 'user', version: '3.0.0' }],
+      'not-an-array@mk': { scope: 'user', installPath: '/nope' },
+      plainkey: [{ scope: 'user', installPath: '/plain/1.0.0', version: '1.0.0' }],
+    },
+  }));
+  const edge = new Map(readInstalledClaudePlugins(root).map((p) => [p.key, p]));
+  assert.equal(edge.get('re@mk').installPath, '/fresh/re/2.0.0', 'last user record wins');
+  assert.equal(edge.get('re@mk').version, '2.0.0');
+  assert.equal(edge.has('no-install-path@mk'), false, 'entry without installPath dropped');
+  assert.equal(edge.has('not-an-array@mk'), false, 'non-array record set dropped');
+  assert.equal(edge.get('plainkey').name, 'plainkey', 'key without @ is the whole name');
+  assert.equal(edge.get('plainkey').marketplace, '');
 });
 
-// ─── discoverPluginContent (real omc install) ────────────────────────────────
+// ─── discoverPluginContent (synthetic large plugin) ──────────────────────────
 
-test('discoverPluginContent: real omc install yields skills/commands/agents', async () => {
-  const skillsOnly = await discoverPluginContent(undefined, 'claude-compat', 'claude-plugin', 750);
-  const withAgents = await discoverPluginContent(undefined, 'claude-compat', 'claude-plugin', 750, { enableAgents: true });
 
-  const omcSkills = skillsOnly.filter((c) => c.path.includes('/omc/oh-my-claudecode/'));
+test('discoverPluginContent: a large plugin yields every skill, command and agent', async () => {
+  const root = makeSandbox('dcc-bigplug-');
+  const version = '4.15.7';
+  const installPath = join(root, 'cache', 'omc', 'oh-my-claudecode', version);
+  // A standard Claude Code plugin: the manifest exists but declares no
+  // skills/commands/agents dirs, so the conventional <installPath>/<kind> dirs
+  // are scanned (the optional-field rule from v1.0.1).
+  mkdirSync(join(installPath, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(installPath, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'oh-my-claudecode', version }));
+  const skillsDir = join(installPath, 'skills');
+  const commandsDir = join(installPath, 'commands');
+  const agentsDir = join(installPath, 'agents');
+  for (let i = 0; i < 40; i += 1) writeSkill(skillsDir, `skill-${i}`);
+  for (let i = 0; i < 20; i += 1) writeCommand(commandsDir, `command-${i}`);
+  for (let i = 0; i < 15; i += 1) writeAgent(agentsDir, `agent-${i}`);
+  // omc ships skills/ask AND commands/ask.md: the same name in two kinds must
+  // survive as two entries (cross-kind duplicates are allowed).
+  writeSkill(skillsDir, 'ask', 'ask a subagent');
+  writeCommand(commandsDir, 'ask', 'ask the skill');
+  writeFileSync(join(root, 'installed_plugins.json'), JSON.stringify({
+    version: 2,
+    plugins: { 'oh-my-claudecode@omc': [{ scope: 'user', installPath, version }] },
+  }));
+
+  const defaultScan = await discoverPluginContent(root, 'claude-compat', 'claude-plugin', 750);
+  const explicitAgents = await discoverPluginContent(
+    root, 'claude-compat', 'claude-plugin', 750, { enableAgents: true });
+
+  const omcSkills = defaultScan.filter((c) => c.path.includes('/omc/oh-my-claudecode/'));
   const skillNames = omcSkills.filter((c) => c.path.includes('/skills/'));
   const commandNames = omcSkills.filter((c) => c.path.includes('/commands/'));
-  const agentNames = withAgents.filter((c) => c.path.includes('/agents/') && c.path.includes('/omc/oh-my-claudecode/'));
+  const agentNames = explicitAgents.filter(
+    (c) => c.path.includes('/agents/') && c.path.includes('/omc/oh-my-claudecode/'));
 
-  assert.ok(skillNames.length >= 40, `expected ≥40 omc skills, got ${skillNames.length}`);
-  assert.ok(commandNames.length >= 20, `expected ≥20 omc commands, got ${commandNames.length}`);
-  assert.ok(agentNames.length >= 15, `expected ≥15 omc agents, got ${agentNames.length}`);
+  assert.ok(skillNames.length >= 40, `expected ≥40 skills, got ${skillNames.length}`);
+  assert.ok(commandNames.length >= 20, `expected ≥20 commands, got ${commandNames.length}`);
+  assert.ok(agentNames.length >= 15, `expected ≥15 agents, got ${agentNames.length}`);
 
-  // shape: kebab names, descriptions, rank/source propagated
+  // shape: kebab names, descriptions, rank/source/provider propagated
   for (const c of omcSkills) {
     assert.match(c.name, /^[a-z0-9]+(-[a-z0-9]+)*$/, `kebab name: ${c.name}`);
     assert.ok(typeof c.description === 'string' && c.description.length > 0, `description present: ${c.name}`);
@@ -67,26 +155,26 @@ test('discoverPluginContent: real omc install yields skills/commands/agents', as
     assert.equal(c.source, 'claude-plugin');
     assert.equal(c.provider, 'claude-compat');
   }
-  // dedupe within plugin per kind: omc ships skills/ask AND commands/ask.md —
-  // cross-kind same-name pairs are allowed (registry dedupe resolves, skill
-  // wins); within one kind no duplicates.
-  const omcAll = withAgents.filter((c) => c.path.includes('/omc/oh-my-claudecode/'));
+  // cross-kind same-name pair survives as two entries …
+  assert.ok(omcSkills.some((c) => c.name === 'ask' && c.path.includes('/skills/')), 'skills/ask kept');
+  assert.ok(omcSkills.some((c) => c.name === 'ask' && c.path.includes('/commands/')), 'commands/ask.md kept');
+  // … but no duplicate names within one kind. (Registry dedupe resolves the
+  // cross-kind pair; within a kind there must be nothing to resolve.)
+  const omcAll = explicitAgents.filter((c) => c.path.includes('/omc/oh-my-claudecode/'));
   for (const kind of ['skills/', 'commands/', 'agents/']) {
     const names = omcAll.filter((c) => c.path.includes(`/${kind}`)).map((c) => c.name);
     assert.equal(new Set(names).size, names.length, `no duplicate names within omc ${kind}`);
   }
   // enableAgents default (undefined) also includes agents (only ===false disables)
-  const defaultAgents = skillsOnly.filter((c) => c.path.includes('/agents/') && c.path.includes('/omc/'));
+  const defaultAgents = defaultScan.filter((c) => c.path.includes('/agents/') && c.path.includes('/omc/'));
   assert.ok(defaultAgents.length >= 15, 'agents discovered when enableAgents omitted');
+  const noAgents = await discoverPluginContent(
+    root, 'claude-compat', 'claude-plugin', 750, { enableAgents: false });
+  assert.equal(noAgents.filter((c) => c.path.includes('/agents/')).length, 0,
+    'enableAgents: false hides agents');
 });
 
 // ─── manifest-less fallback (synthetic fixture) ──────────────────────────────
-
-function writeSkill(parentDir, name, description = `${name} skill`) {
-  const dir = join(parentDir, name);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'SKILL.md'), `---\nname: ${name}\ndescription: ${description}\n---\nbody of ${name}\n`);
-}
 
 test('discoverPluginContent: manifest-less plugin falls back to dir scan', async () => {
   const root = makeSandbox('dcc-plugins-');

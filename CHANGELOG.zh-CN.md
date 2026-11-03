@@ -4,6 +4,11 @@
 
 本项目所有重要变更记录于此。版本遵循 [SemVer](https://semver.org/)。
 
+## [1.0.4] — 2026-11-03
+
+### 测试
+- **`npm run check` 现在在任意机器上都是绿的。** `test/v050.test.js` 里有两个用例断言的是真实 `~/.claude/plugins` 安装内容（注册表里必须有 `oh-my-claudecode`，且从中发现 ≥40 个技能、≥20 个命令、≥15 个 agent），于是在任何没装这个插件的机器上，套件都是红的 —— 每次回答「测试过了吗」都得补一句「除了两个环境依赖失败」。现在两个用例都在临时目录里自建 plugins 根与插件，完全按 Claude Code 实际写入的布局（`<root>/installed_plugins.json` 加 `<root>/cache/<marketplace>/<name>/<version>`），断言同样的阈值、同样的候选形状、以及同样的跨类同名规则（`skills/ask` 与 `commands/ask.md` 各自保留）。顺带把此前没有覆盖的注册表边界情况钉住：重装后最后一条 `user` 记录生效、`project` 作用域记录被跳过、缺少 `installPath` 的记录被丢弃、key 中没有 `@` 时 marketplace 为空；`enableAgents: false` 隐藏 agents 也有了覆盖。没有任何用例读本机真实 `~/.claude`，所以换台机器一样绿，也不会因为插件升级或卸载而腐坏。
+
 ## [1.0.3] — 2026-11-03
 
 ### 变更

@@ -4,6 +4,11 @@ English | [简体中文](CHANGELOG.zh-CN.md)
 
 All notable changes to this project are documented here. Versions follow [SemVer](https://semver.org/).
 
+## [1.0.4] — 2026-11-03
+
+### Tests
+- **`npm run check` is green on any machine.** Two cases in `test/v050.test.js` asserted against the real `~/.claude/plugins` installs (`oh-my-claudecode` present in the registry; ≥40 skills, ≥20 commands, ≥15 agents discovered from it), so the suite failed on every machine without that exact plugin — and every "did the tests pass?" answer needed a "...except two environment-dependent failures" caveat. Both cases now build their own plugins root and plugin in a temp dir, in the layout Claude Code actually writes (`<root>/installed_plugins.json` plus `<root>/cache/<marketplace>/<name>/<version>`), and assert the same thresholds, the same candidate shape, and the same cross-kind `skills/ask` vs `commands/ask.md` rule. Registry edge cases that had no coverage are pinned alongside: the last `user` record wins after a reinstall, `project`-scope records are skipped, a record with no `installPath` is dropped, and a key without `@` carries no marketplace. `enableAgents: false` hiding agents is covered too. Nothing reads the machine's real `~/.claude`, so the suite passes everywhere and stops rotting when the plugin upgrades or is uninstalled.
+
 ## [1.0.3] — 2026-11-03
 
 ### Changed
