@@ -364,3 +364,26 @@ test('wiring: a Stop hook notice reaches the next prompt as a notice message', a
   );
   assert.deepEqual(second.messages, []);
 });
+
+test('wiring: notice text is stripped of terminal color codes', async () => {
+  const project = sandbox('dcc-ansi-');
+  mkdirSync(join(project, '.git'));
+  // A real ESC byte, written by printf as octal so no JS escaping is involved.
+  writeFileSync(join(project, 'hook.sh'), "#!/bin/sh\nprintf '\\033[1m\\033[93m🧬 colored notice\\033[0m\\n'\n");
+  writeJson(join(project, '.claude', 'settings.json'), {
+    hooks: { Stop: [{ hooks: [{ type: 'command', command: `sh ${join(project, 'hook.sh')}` }] }] },
+  });
+  const listeners = new Map();
+  registerHooks({ on: (n, f) => { listeners.set(n, f); return () => {}; }, get: () => undefined },
+    { userClaudeDir: join(project, 'nouser'), pluginsRoot: join(project, 'noplugins') });
+  invalidateHookCache();
+
+  const agent = { session: { header: { id: 'session-ansi', cwd: project } } };
+  await listeners.get('agent/turn-stopping')({ agent, turn: 1, signal: new AbortController().signal });
+  const d = await listeners.get('agent/pre-step')(
+    { agent, messages: [{ content: [{ type: 'text', text: 'hi' }] }] },
+    async () => ({ kind: 'enter', messages: [] }),
+  );
+  const text = (d.messages ?? []).flatMap((m) => m.content.map((c) => c.text)).join('');
+  assert.equal(text, '🧬 colored notice', 'escape sequences are stripped before display');
+});

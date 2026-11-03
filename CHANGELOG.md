@@ -4,6 +4,11 @@ English | [简体中文](CHANGELOG.zh-CN.md)
 
 All notable changes to this project are documented here. Versions follow [SemVer](https://semver.org/).
 
+## [1.1.2] — 2026-11-03
+
+### Fixed
+- **Hook notices no longer show terminal color escapes.** claude-evol prints its review reminder with `\u001b[1m\u001b[93m`, so the notice arrived in the transcript as raw escape garbage. Terminal color is stripped before display, the way Claude Code does it.
+
 ## [1.1.1] — 2026-11-03
 
 ### Added

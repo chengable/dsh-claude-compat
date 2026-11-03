@@ -653,7 +653,11 @@ export function registerHooks(ctx, config) {
   // keep a finished turn open the way injecting at turn-stopping would.
   const pendingNotices = new Map();
 
-  const noticeOf = (texts) => texts.map((text) => createUserMessage({
+  // Claude Code strips terminal color from hook output before showing it; a raw
+  // `\u001b[1m\u001b[93m` would surface as garbage in the transcript.
+  const stripAnsi = (text) => text.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
+
+  const noticeOf = (texts) => texts.map((raw) => stripAnsi(raw)).filter((text) => text.trim() !== '').map((text) => createUserMessage({
     content: [{ type: 'text', text }],
     source: { kind: CLAUDE_COMPAT_SOURCE_KIND, form: 'notice', summary: text.slice(0, 160) },
   }));
