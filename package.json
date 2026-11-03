@@ -32,7 +32,14 @@
     "rules"
   ],
   "license": "MIT",
-  "author": "biedongbin",
+  "author": "chengable",
+  "contributors": [
+    {
+      "name": "biedongbin",
+      "url": "https://github.com/biedongbin/dsh-claude-compat",
+      "note": "original author of dsh-claude-compat; this package is the maintained fork"
+    }
+  ],
   "dependencies": {
     "yaml": "^2.0.0"
   },
@@ -67,6 +74,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/biedongbin/dsh-claude-compat.git"
+    "url": "git+https://github.com/chengable/dsh-claude-compat.git"
+  },
+  "homepage": "https://github.com/chengable/dsh-claude-compat#readme",
+  "bugs": {
+    "url": "https://github.com/chengable/dsh-claude-compat/issues"
   }
 }
