@@ -26,6 +26,8 @@ ps -o pid,lstart,command -p <dsh 进程 pid>
 grep -n "enablePluginMcp: z.boolean().default" ~/.dsh/profiles/desktop/node_modules/dsh-claude-compat/src/index.js
 ```
 
+**配置也按会话 workspace 解析**：hooks 与 MCP 的项目级配置（`.claude/settings.json`、`.claude/settings.local.json`、`.mcp.json`）现在都从会话工作目录解析。历史上的坑是按 `process.cwd()` 解析 —— 桌面宿主 cwd 是 `~/.dsh/profiles/desktop`，于是项目级配置永远读不到、且没有一行日志。以后新增任何"项目级"读取，都用会话 cwd，不要用进程 cwd。
+
 profile 的 `package.json` 里依赖写的是 `github:chengable/dsh-claude-compat#main`，`dsh.profile.bundles` 里也有它 —— 也就是说"装一次"记的是 github 解析结果，而 deploy-local 是**纯文件覆盖**，两者会各自留下痕迹（见 §9）。
 
 ---

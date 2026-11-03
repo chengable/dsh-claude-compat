@@ -124,11 +124,14 @@ VERSION="$(node -p "require('$TARGET/package.json').version" 2>/dev/null || echo
 echo "✓ 已同步 → $TARGET"
 echo "  版本: $VERSION"
 
-# The MCP opt-in lives in the profile patch, not in the package: refuse to let a
-# deploy silently ship a build whose MCP servers nobody asked to mount.
+# Plugin MCP mounting is decided by the package's own schema default (true since
+# 1.0.3), so the old "add enablePluginMcp: true to the profile patch" hint was
+# stale and sent people to edit a layer the reinstall wipes. Check the deployed
+# copy instead: if the default is off AND the profile does not override it, say so.
 PROFILE_PATCH="$DSH_HOME/profiles/$PROFILE/cordis.patch.yml"
-if [[ -f "$PROFILE_PATCH" ]] && ! grep -q "enablePluginMcp: true" "$PROFILE_PATCH"; then
-  echo "  提示: $PROFILE_PATCH 里没有 enablePluginMcp: true —— 插件自带 MCP server 不会挂载。"
+DEPLOYED_DEFAULT="$(grep -o "enablePluginMcp: z.boolean().default([a-z]*)" "$TARGET/src/index.js" 2>/dev/null | grep -o "[a-z]*)$" | tr -d ')')"
+if [[ "$DEPLOYED_DEFAULT" = "false" ]] && ! grep -q "enablePluginMcp: true" "$PROFILE_PATCH" 2>/dev/null; then
+  echo "  提示: 部署副本的 enablePluginMcp 默认是 false 且 profile 未覆盖 —— 插件自带 MCP server 不会挂载。"
 fi
 
 echo
