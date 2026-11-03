@@ -340,7 +340,7 @@ test('wiring: a Stop hook notice reaches the next prompt as a notice message', a
     get: () => undefined,
   };
   invalidateHookCache();
-  registerHooks(ctx, { userClaudeDir: join(project, 'nouser'), pluginsRoot: join(project, 'noplugins') });
+  registerHooks(ctx, { userClaudeDir: join(project, 'nouser'), pluginsRoot: join(project, 'noplugins'), hookOutputMode: 'context' });
 
   const agent = { session: { header: { id: 'session-wiring', cwd: project } } };
   await listeners.get('agent/turn-stopping')({ agent, turn: 1, signal: new AbortController().signal });
@@ -377,7 +377,7 @@ test('wiring: notice text is stripped of terminal color codes', async () => {
   });
   const listeners = new Map();
   registerHooks({ on: (n, f) => { listeners.set(n, f); return () => {}; }, get: () => undefined },
-    { userClaudeDir: join(project, 'nouser'), pluginsRoot: join(project, 'noplugins') });
+    { userClaudeDir: join(project, 'nouser'), pluginsRoot: join(project, 'noplugins'), hookOutputMode: 'context' });
   invalidateHookCache();
 
   const agent = { session: { header: { id: 'session-ansi', cwd: project } } };
@@ -402,14 +402,14 @@ test('wiring: a Stop notice survives a restart and renders on the next prompt', 
 
   const first = new Map();
   registerHooks({ on: (n, f) => { first.set(n, f); return () => {}; }, get: () => undefined },
-    { userClaudeDir: join(project, 'nouser'), pluginsRoot: join(project, 'noplugins') });
+    { userClaudeDir: join(project, 'nouser'), pluginsRoot: join(project, 'noplugins'), hookOutputMode: 'context' });
   invalidateHookCache();
   await first.get('agent/turn-stopping')({ agent, turn: 1, signal: new AbortController().signal });
 
   // Simulate a restart: fresh listener set (fresh in-memory queue), same session.
   const second = new Map();
   registerHooks({ on: (n, f) => { second.set(n, f); return () => {}; }, get: () => undefined },
-    { userClaudeDir: join(project, 'nouser'), pluginsRoot: join(project, 'noplugins') });
+    { userClaudeDir: join(project, 'nouser'), pluginsRoot: join(project, 'noplugins'), hookOutputMode: 'context' });
   const d = await second.get('agent/pre-step')(
     { agent, messages: [{ content: [{ type: 'text', text: 'hi' }] }] },
     async () => ({ kind: 'enter', messages: [] }),
@@ -423,4 +423,29 @@ test('wiring: a Stop notice survives a restart and renders on the next prompt', 
     async () => ({ kind: 'enter', messages: [] }),
   );
   assert.deepEqual(again.messages, []);
+});
+
+test('wiring: model mode hands the notice over with a quote instruction', async () => {
+  // The desktop page renders the model's reply, not a plugin-injected message,
+  // so the visible path asks the model to quote the hook output.
+  const project = sandbox('dcc-notice-model-');
+  mkdirSync(join(project, '.git'));
+  writeJson(join(project, '.claude', 'settings.json'), {
+    hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo \'{"systemMessage":"阈值提示"}\'' }] }] },
+  });
+  const listeners = new Map();
+  registerHooks({ on: (n, f) => { listeners.set(n, f); return () => {}; }, get: () => undefined },
+    { userClaudeDir: join(project, 'nouser'), pluginsRoot: join(project, 'noplugins') }); // default: model
+  invalidateHookCache();
+
+  const agent = { session: { header: { id: 'session-model-mode', cwd: project } } };
+  await listeners.get('agent/turn-stopping')({ agent, turn: 1, signal: new AbortController().signal });
+  const d = await listeners.get('agent/pre-step')(
+    { agent, messages: [{ content: [{ type: 'text', text: 'hi' }] }] },
+    async () => ({ kind: 'enter', messages: [] }),
+  );
+  const text = (d.messages ?? []).flatMap((m) => m.content.map((c) => c.text)).join('');
+  assert.match(text, /回复开头/, 'carries the instruction to surface it');
+  assert.match(text, /阈值提示/, 'and the hook output itself');
+  assert.equal(d.messages[0].source.form, 'hook-context');
 });

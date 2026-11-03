@@ -120,6 +120,7 @@ Restart DSH (`dsh web`). Done — skills show up in `/`, rules are injected into
 | `enableHooks` | `true` | Run Claude Code hooks (settings files, and every installed plugin's `hooks/hooks.json`) |
 | `enablePluginHooks` | `true` | Run the hooks that installed Claude Code plugins ship (set `false` for settings-file hooks only) |
 | `surfaceHookOutput` | `true` | Show hook chatter (a Stop hook's stdout / `systemMessage`) in the transcript as a notice on the next prompt |
+| `hookOutputMode` | `model` | Where a hook's own output goes: `model` (quote it in the reply — the only channel the page renders), `context` (model-facing only), `off` |
 | `hooksTimeoutMs` | `60000` | Per-hook run timeout (UserPromptSubmit capped at 10s regardless) |
 | `enableAgents` | `true` | Surface `.claude/agents/*.md` as delegation-shim skills |
 | `skillAliases` | `{}` | Non-kebab (e.g. Chinese) name → ASCII slug map, e.g. `{ "三脑": "san-nao" }`. See “Non-ASCII skill names” below |

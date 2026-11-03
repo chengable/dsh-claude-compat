@@ -103,6 +103,13 @@ export const Config = z.object({
   // transcript as a notice on the next prompt. Claude Code shows this text; DSH
   // has no hook-output channel, so the bridge carries it forward itself.
   surfaceHookOutput: z.boolean().default(true),
+  // How a hook's own output (a Stop hook's stdout / systemMessage) reaches the
+  // user. DSH's page renders the human's messages, the model's replies and tool
+  // cards only — a plugin-injected user message stays model-facing. So 'model'
+  // (default) hands the text over with an instruction to quote it in the reply,
+  // which is the only channel the desktop page actually shows. 'context' keeps
+  // it model-facing only; 'off' drops it.
+  hookOutputMode: z.string().default('model'),
   hooksTimeoutMs: z.number().default(60000),
   enableAgents: z.boolean().default(true),
   // Non-ASCII (e.g. Chinese) skill/command/agent names can never satisfy DSH's

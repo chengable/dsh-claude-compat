@@ -663,10 +663,24 @@ export function registerHooks(ctx, config) {
   // does not know a producer for. `hook-context` is the form the same plugin
   // already uses for SessionStart/UserPromptSubmit context — those render as an
   // opaque block, which is visible. Empirically the only form that shows up.
-  const noticeOf = (texts) => texts.map((raw) => stripAnsi(raw)).filter((text) => text.trim() !== '').map((text) => createUserMessage({
-    content: [{ type: 'text', text }],
-    source: { kind: CLAUDE_COMPAT_SOURCE_KIND, form: 'hook-context' },
-  }));
+  // DSH's chat view renders the human's messages, the model's replies and tool
+  // cards — a plugin-injected user message is model-facing only (verified: this
+  // plugin's own hook-context blocks never appear on the desktop page). The ONLY
+  // reliably visible channel is therefore the model's reply, so the notice is
+  // handed over with an instruction to quote it.
+  const noticeOf = (texts) => texts
+    .map((raw) => stripAnsi(raw))
+    .filter((text) => text.trim() !== '')
+    .map((text) => createUserMessage(hookOutputMode() === 'model' ? {
+      content: [{
+        type: 'text',
+        text: `[hook 输出] 请在你的回复开头用引用块原样列出下面这段插件提示，然后再回答用户的问题：\n\n${text}`,
+      }],
+      source: { kind: CLAUDE_COMPAT_SOURCE_KIND, form: 'hook-context' },
+    } : {
+      content: [{ type: 'text', text }],
+      source: { kind: CLAUDE_COMPAT_SOURCE_KIND, form: 'hook-context' },
+    }));
 
   // Notices ride the inbox (a claimed user message) because that is the path the
   // web client renders as its own bubble; a bare `session.append` lands in the
@@ -674,8 +688,12 @@ export function registerHooks(ctx, config) {
   // a restart between the Stop and the next prompt cannot swallow it.
   const noticeFile = (agent) => join(tmpdir(), 'dsh-claude-compat', `${agentSessionId(agent)}.json`);
 
+  // Defaults come from the Config schema at runtime; tests pass plain objects.
+  const hookOutputMode = () => config.hookOutputMode ?? 'model';
+  const hookOutputOn = hookOutputMode() !== 'off' && config.surfaceHookOutput !== false;
+
   const queueNotices = (agent, texts) => {
-    if (config.surfaceHookOutput === false || texts.length === 0) return;
+    if (!hookOutputOn || texts.length === 0) return;
     const clean = texts.map(stripAnsi).filter((text) => text.trim() !== '');
     if (clean.length === 0) return;
     const key = agentSessionId(agent);

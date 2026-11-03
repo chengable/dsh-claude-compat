@@ -4,6 +4,11 @@ English | [简体中文](CHANGELOG.zh-CN.md)
 
 All notable changes to this project are documented here. Versions follow [SemVer](https://semver.org/).
 
+## [1.1.6] — 2026-11-03
+
+### Changed
+- **A hook's own output now reaches the user through the model's reply.** Verified in the desktop client: the chat view renders the human's messages, the model's replies and tool cards — a plugin-injected user message stays model-facing (this plugin's own hook-context blocks never appeared on the page, which is why the notice looked "in the log but not on screen"). The new default `hookOutputMode: 'model'` hands the text to the next prompt with an instruction to quote it at the start of the reply; `context` keeps the old model-facing-only behavior, `off` drops it.
+
 ## [1.1.5] — 2026-11-03
 
 ### Fixed
