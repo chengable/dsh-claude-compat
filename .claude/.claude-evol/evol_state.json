@@ -1,9 +1,9 @@
 {
   "version": "1.0.0",
   "counters": {
-    "session:session-1521ea5c-6735-4c9a-9ecb-fb9fe66bce4c": 29
+    "session:session-1521ea5c-6735-4c9a-9ecb-fb9fe66bce4c": 45
   },
   "thresholds": {},
-  "pending_review": false,
+  "pending_review": true,
   "auto_mode": false
 }

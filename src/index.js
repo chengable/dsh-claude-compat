@@ -99,6 +99,10 @@ export const Config = z.object({
   // user already trusts these plugins, and a plugin whose hooks never fire is
   // silently half-working. Set `false` to run only settings-file hooks.
   enablePluginHooks: z.boolean().default(true),
+  // Surface hook chatter (a Stop hook's plain stdout / `systemMessage`) in the
+  // transcript as a notice on the next prompt. Claude Code shows this text; DSH
+  // has no hook-output channel, so the bridge carries it forward itself.
+  surfaceHookOutput: z.boolean().default(true),
   hooksTimeoutMs: z.number().default(60000),
   enableAgents: z.boolean().default(true),
   // Non-ASCII (e.g. Chinese) skill/command/agent names can never satisfy DSH's

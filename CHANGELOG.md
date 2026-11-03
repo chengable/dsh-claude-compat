@@ -4,6 +4,18 @@ English | [简体中文](CHANGELOG.zh-CN.md)
 
 All notable changes to this project are documented here. Versions follow [SemVer](https://semver.org/).
 
+## [1.1.1] — 2026-11-03
+
+### Added
+- **Hook chatter is visible in the transcript.** A Stop hook's plain stdout (and the explicit `systemMessage` field) is what Claude Code shows as hook output — claude-evol's "以下 N 个会话已达审查阈值" reminder is exactly that. DSH has no hook-output channel, so the bridge now carries the text to the **next prompt** as a `form: 'notice'` user message. It is buffered at the turn boundary rather than injected there, because injecting at `agent/turn-stopping` would keep the finished turn open. New `surfaceHookOutput` (default `true`) turns it off.
+
+### Fixed
+- **A failing hook is no longer silent.** An exit code other than 0 (success) or 2 (deliberate block) is a broken hook; Claude Code surfaces it, and staying quiet made an upgraded-broken plugin look identical to a working one. It now logs a non-blocking warning.
+- **Plugin MCP server names carry Claude Code's `plugin_` segment**: `mcp__plugin_<plugin>_<server>__<tool>`. Permission rules and hook matchers are written against that exact name, so the previous `mcp__<plugin>_<server>__<tool>` shape could never match them.
+
+### Tests
+- Hook-notice decoding/merging (`test/v110.test.js`); suite: 97 tests, all green.
+
 ## [1.1.0] — 2026-11-03
 
 ### Added

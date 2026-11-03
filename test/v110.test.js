@@ -300,3 +300,24 @@ test('payloads carry the Claude Code field names, including the session cwd', ()
   assert.equal(sub.agent_id, 'agent-7');
   assert.equal(sub.agent_type, 'general-purpose');
 });
+
+test('hook chatter is decoded and merged as a user-visible notice', () => {
+  // Plain stdout on a clean exit is what Claude Code shows as hook output.
+  const decoded = decodeHookOutput({ exitCode: 0, stdout: '🧬 review threshold reached', stderr: '' }, 'Stop');
+  assert.equal(decoded.plain, '🧬 review threshold reached');
+  assert.equal(decoded.decision, undefined);
+
+  // `systemMessage` is the explicit user-facing field and wins over plain stdout.
+  const merged = mergeHookOutcomes([
+    decodeHookOutput({ exitCode: 0, stdout: 'plain text', stderr: '' }, 'Stop'),
+    decodeHookOutput({ exitCode: 0, stdout: JSON.stringify({ systemMessage: 'explicit note' }), stderr: '' }, 'Stop'),
+  ]);
+  assert.deepEqual(merged.messages, ['plain text', 'explicit note']);
+
+  // Structured JSON is not repeated as a notice.
+  const json = mergeHookOutcomes([
+    decodeHookOutput({ exitCode: 0, stdout: JSON.stringify({ additionalContext: 'ctx' }), stderr: '' }, 'Stop'),
+  ]);
+  assert.deepEqual(json.messages, []);
+  assert.deepEqual(json.additionalContext, ['ctx']);
+});

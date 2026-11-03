@@ -119,6 +119,7 @@ dsh plugin --profile web add github:biedongbin/dsh-claude-compat
 | `mcpFailOnStartupError` | `false` | 转发给 `dsh-mcp-client`：MCP 服务器连接失败时让插件启动失败 |
 | `enableHooks` | `true` | 运行 Claude Code hooks（settings 文件，以及每个已安装插件的 `hooks/hooks.json`） |
 | `enablePluginHooks` | `true` | 运行插件自带的 hooks（设为 `false` 则只跑 settings 文件里的） |
+| `surfaceHookOutput` | `true` | 把 hook 的输出（Stop hook 的 stdout / `systemMessage`）作为提示消息在下一条 prompt 里显示到会话中 |
 | `hooksTimeoutMs` | `60000` | 单个 hook 运行超时（UserPromptSubmit 无论如何上限 10s） |
 | `enableAgents` | `true` | 把 `.claude/agents/*.md` 暴露为委派 shim skill |
 | `skillAliases` | `{}` | 非 kebab 名（中文等）→ ASCII slug 的映射，如 `{ "三脑": "san-nao" }`。见下方「中文 / 非 ASCII 技能名」 |

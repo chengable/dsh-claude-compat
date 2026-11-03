@@ -429,7 +429,13 @@ export function decodeHookOutput({ exitCode, stdout, stderr }, expectedEvent) {
     if (reason.length > 0) decoded.reason = reason;
     return decoded;
   }
-  if (exitCode !== 0 || !out.startsWith('{')) return decoded;
+  if (exitCode !== 0) return decoded;
+  if (!out.startsWith('{')) {
+    // Plain stdout is what Claude Code shows as hook output ("notice"), e.g.
+    // claude-evol's review-threshold reminder. Keep it for the caller.
+    if (out.length > 0) decoded.plain = out;
+    return decoded;
+  }
   let parsed;
   try { parsed = JSON.parse(out); } catch { return decoded; }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return decoded;
@@ -481,6 +487,7 @@ export function mergeHookOutcomes(outputs) {
   let stop = false;
   let stopReason;
   const contexts = [];
+  const messages = [];
   for (const output of outputs) {
     const r = decisionRank(output.decision);
     if (r > rank) { rank = r; reasons.length = 0; }
@@ -494,6 +501,13 @@ export function mergeHookOutcomes(outputs) {
     if (typeof output.additionalContext === 'string' && output.additionalContext.length > 0) {
       contexts.push(output.additionalContext);
     }
+    // User-visible hook chatter: `systemMessage` first (Claude Code shows it as a
+    // user-facing note), then plain stdout for a clean exit.
+    if (typeof output.systemMessage === 'string' && output.systemMessage.length > 0) {
+      messages.push(output.systemMessage);
+    } else if (typeof output.plain === 'string' && output.plain.length > 0) {
+      messages.push(output.plain);
+    }
   }
   return {
     decision: rank === 3 ? 'deny' : rank === 2 ? 'ask' : rank === 1 ? 'allow' : 'none',
@@ -501,6 +515,7 @@ export function mergeHookOutcomes(outputs) {
     stop,
     stopReason,
     additionalContext: contexts,
+    messages,
   };
 }
 
@@ -632,6 +647,33 @@ export function registerHooks(ctx, config) {
     return { merged: mergeHookOutcomes(outputs), cwd };
   }
 
+  // Hook chatter (plain stdout / systemMessage) has no direct UI channel in DSH.
+  // Buffer it at a turn boundary and deliver it with the NEXT prompt as a
+  // `form: 'notice'` user message: visible in the transcript, and it cannot
+  // keep a finished turn open the way injecting at turn-stopping would.
+  const pendingNotices = new Map();
+
+  const noticeOf = (texts) => texts.map((text) => createUserMessage({
+    content: [{ type: 'text', text }],
+    source: { kind: CLAUDE_COMPAT_SOURCE_KIND, form: 'notice', summary: text.slice(0, 160) },
+  }));
+
+  const queueNotices = (agent, texts) => {
+    if (config.surfaceHookOutput === false || texts.length === 0) return;
+    const key = agentSessionId(agent);
+    const list = pendingNotices.get(key) ?? [];
+    list.push(...texts);
+    pendingNotices.set(key, list);
+  };
+
+  const drainNotices = (agent) => {
+    const key = agentSessionId(agent);
+    const list = pendingNotices.get(key);
+    if (list === undefined) return [];
+    pendingNotices.delete(key);
+    return noticeOf(list);
+  };
+
   // ── SessionStart → agent/created ──────────────────────────────────────────
   ctx.on('agent/created', (carrier, name, payload) => {
     const agent = carrier?.agent ?? payload?.agent;
@@ -657,9 +699,12 @@ export function registerHooks(ctx, config) {
       }
       const downstream = typeof next === 'function' ? await next() : { kind: 'enter' };
       const context = contextMessage(merged.additionalContext);
-      if (context === undefined || downstream.kind !== 'enter') return downstream;
+      const notices = drainNotices(agent);
+      if (downstream.kind !== 'enter') return downstream;
+      const extra = [...(context !== undefined ? [context] : []), ...notices];
+      if (extra.length === 0) return downstream;
       // Never short-circuit: a later listener still gets to reject the prompt.
-      return { ...downstream, messages: [...(downstream.messages ?? []), context] };
+      return { ...downstream, messages: [...(downstream.messages ?? []), ...extra] };
     }
     return typeof next === 'function' ? next() : { kind: 'enter' };
   });
@@ -695,6 +740,9 @@ export function registerHooks(ctx, config) {
   ctx.on('agent/turn-stopping', async (event) => {
     const agent = event?.agent;
     const { merged } = await runEvent('Stop', '', (cwd) => stopPayload(agent, cwd), agent);
+    // A Stop hook's stdout is a user-facing note in Claude Code (e.g. claude-evol's
+    // review-threshold reminder). Hand it to the next prompt.
+    queueNotices(agent, merged.messages ?? []);
     if (merged.decision === 'deny' || merged.stop === true) {
       const text = merged.reason ?? merged.stopReason ?? 'continue: blocked by Stop hook';
       if (typeof agent?.steer === 'function') {

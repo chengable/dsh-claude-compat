@@ -4,6 +4,18 @@
 
 本项目所有重要变更记录于此。版本遵循 [SemVer](https://semver.org/)。
 
+## [1.1.1] — 2026-11-03
+
+### 新增
+- **hook 的输出现在能在会话里看到。** Stop hook 的纯 stdout（以及显式的 `systemMessage` 字段）就是 Claude Code 显示出来的那种 hook 提示，claude-evol 的「以下 N 个会话已达审查阈值」正是如此。DSH 没有 hook 输出的展示通道，所以桥把这段文本缓冲到**下一条 prompt**，以 `form: 'notice'` 的用户消息投递。之所以在轮次边界缓冲、而不是当场注入，是因为在 `agent/turn-stopping` 注入会让本已结束的轮次继续保持打开。新增 `surfaceHookOutput`（默认 `true`）可关闭。
+
+### 修复
+- **失败的 hook 不再静默。** 退出码既不是 0（成功）也不是 2（故意拦截），说明 hook 自己坏了；Claude Code 会把它报出来，而这里保持安静会让"升级后坏掉的插件"和"正常工作但没做事"完全无法区分。现在会打一条 non-blocking 告警。
+- **插件 MCP 的 server 名补上 Claude Code 的 `plugin_` 段**：`mcp__plugin_<plugin>_<server>__<tool>`。permission 规则与 hook matcher 都是按这个全名写的，之前 `mcp__<plugin>_<server>__<tool>` 的形态永远匹配不上。
+
+### 测试
+- 新增 hook 输出的解码与合并用例（`test/v110.test.js`）；套件共 97 项，全部通过。
+
 ## [1.1.0] — 2026-11-03
 
 ### 新增
