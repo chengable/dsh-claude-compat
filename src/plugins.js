@@ -3,9 +3,12 @@
 // Claude Code's plugin-marketplace installs plugins into
 // <pluginsRoot>/cache/<marketplace>/<name>/<version>/ and records them in
 // <pluginsRoot>/installed_plugins.json. Each install root carries a
-// .claude-plugin/plugin.json manifest listing skills dirs / commands dir /
-// agents dir / an .mcp.json. We surface skills/commands/agents as DSH skill
-// candidates at pluginSkillRank (default 750 — the long tail, below
+// .claude-plugin/plugin.json manifest. Its fields (skills dirs, commands dir,
+// agents dir, mcpServers) are all optional: an absent field means the standard
+// layout (<installPath>/skills, <installPath>/commands, <installPath>/agents) is
+// scanned, and only a declared value replaces that default. We surface
+// skills/commands/agents as DSH skill candidates at pluginSkillRank (default
+// 750 — the long tail, below
 // user-claude 700 and bundled 600), keeping original names; existing dedupe
 // resolves collisions. Plugin MCP servers mount only when enablePluginMcp is
 // opted in (mounting third-party MCP servers is a bigger trust step than
@@ -89,15 +92,15 @@ export async function discoverPluginContent(pluginsRoot, providerName, source, r
         out.push(c);
       }
     };
-    if (manifest !== undefined) {
-      const skillDirs = manifestDirs(manifest, 'skills', installPath);
-      for (const dir of skillDirs) push('skills')(await discoverSkills(dir, providerName, source, rank, aliasOptions));
-      const commandsDir = typeof manifest.commands === 'string' ? resolve(installPath, manifest.commands) : undefined;
-      if (commandsDir !== undefined) push('commands')(await patchedCommands(commandsDir));
-    } else {
-      push('skills')(await discoverSkills(join(installPath, 'skills'), providerName, source, rank, aliasOptions));
-      push('commands')(await patchedCommands(join(installPath, 'commands')));
+    // A manifest that omits `skills` still describes the standard Claude Code
+    // plugin layout: the skills live in <installPath>/skills. Only a manifest
+    // that actually lists dirs replaces the default scan — previously an omitted
+    // field produced an empty list and dropped every skill of the plugin without
+    // a warning (claude-mem ships 22 skills that way).
+    for (const dir of pluginSkillDirs(manifest, installPath)) {
+      push('skills')(await discoverSkills(dir, providerName, source, rank, aliasOptions));
     }
+    push('commands')(await patchedCommands(pluginCommandsDir(manifest, installPath)));
     if (enableAgents !== false) {
       const agentsDir = join(installPath, 'agents');
       if (await pathExists(agentsDir)) push('agents')(await discoverAgents(agentsDir, providerName, source, rank, aliasOptions));
@@ -161,6 +164,31 @@ function manifestDirs(manifest, field, installPath) {
     return v.filter((d) => typeof d === 'string').map((d) => resolve(installPath, d));
   }
   return [];
+}
+
+/**
+ * Directories to scan for one plugin's skills.
+ *
+ * A manifest field that is absent (or empty) means the standard
+ * `<installPath>/skills` layout — the same default the no-manifest branch uses.
+ * Only a declared value replaces that default, which is what Claude Code does:
+ * the field is optional and most marketplace plugins (claude-mem, skill-creator,
+ * plugin-dev, agent-morph, …) rely on the conventional directory.
+ *
+ * @returns Absolute skill root directories, in scan order.
+ */
+export function pluginSkillDirs(manifest, installPath) {
+  const declared = manifest === undefined ? [] : manifestDirs(manifest, 'skills', installPath);
+  return declared.length > 0 ? declared : [join(installPath, 'skills')];
+}
+
+/**
+ * Directory to scan for one plugin's commands. A manifest `commands` string wins;
+ * an absent field means the standard `<installPath>/commands` layout.
+ */
+export function pluginCommandsDir(manifest, installPath) {
+  if (manifest !== undefined && typeof manifest.commands === 'string') return resolve(installPath, manifest.commands);
+  return join(installPath, 'commands');
 }
 
 // Translate a plugin's MCP config into dsh-mcp-client server configs. Returns

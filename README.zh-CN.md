@@ -124,7 +124,7 @@ dsh plugin --profile web add github:biedongbin/dsh-claude-compat
 | `aliasDescriptionPrefix` | `true` | 用了 alias 时把原名放在描述最前：`san-nao: 三脑 — …` |
 | `rulesMaxBytes` | `65536` | 注入项目 rules 总量硬上限 |
 | `userRulesMaxBytes` | `65536` | 注入 `~/.claude/rules` 总量硬上限 |
-| `projectRootMarkers` | `[".git"]` | 项目根发现的祖先标记 |
+| `projectRootMarkers` | `[".git", "CLAUDE.md"]` | 项目根发现的祖先标记。两个都不命中时回退到会话 cwd（与 DSH 自身的项目根规则一致） |
 | `skillRank` | `50` | 项目 `.claude` skills 的 provider 排名（压过一切 DSH 原生冲突） |
 | `skillSource` | `project-claude` | 项目 catalog 条目来源标签 |
 | `userSkillRank` | `700` | `~/.claude` skills 的 provider 排名（输给 DSH 原生 `600`） |

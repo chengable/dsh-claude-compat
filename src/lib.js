@@ -24,26 +24,49 @@ export function resolveUserClaudeDir(dir) {
   return resolve(dir);
 }
 
-export async function findProjectRoot(cwd, markers = ['.git']) {
+// Markers that identify a project root. `.git` alone is too strict: Claude Code
+// itself does not require the project to be a git repository, and `CLAUDE.md`
+// is present in essentially every Claude Code project, so it also covers the
+// "session opened in a subdirectory of the project" case.
+export const DEFAULT_PROJECT_ROOT_MARKERS = ['.git', 'CLAUDE.md'];
+
+/**
+ * Nearest ancestor of `cwd` carrying one of `markers`, else `cwd` itself.
+ *
+ * Claude Code does not require a project to be a git repository: `claude` reads
+ * `.claude/skills`, `.claude/rules` and `.mcp.json` from a plain directory as
+ * well. Returning `undefined` at the filesystem root therefore used to drop the
+ * entire project-scoped discovery chain without a single warning, for every
+ * project that is not under version control. Falling back to `cwd` matches what
+ * DSH's own `dsh-skill-filesystem` does for its project roots ("without a
+ * marker, the current cwd is used").
+ *
+ * @param cwd - Session working directory.
+ * @param markers - Root markers; the nearest match wins.
+ * @param options.fallbackToCwd - Return `cwd` when no marker is found (default
+ *   `true`). Pass `false` for callers that must stay root-scoped, such as the
+ *   process-lifetime `.mcp.json` mount.
+ */
+export async function findProjectRoot(cwd, markers = DEFAULT_PROJECT_ROOT_MARKERS, { fallbackToCwd = true } = {}) {
   let current = resolve(cwd);
   while (true) {
     for (const marker of markers) {
       if (await pathExists(join(current, marker))) return current;
     }
     const parent = dirname(current);
-    if (parent === current) return undefined;
+    if (parent === current) return fallbackToCwd ? resolve(cwd) : undefined;
     current = parent;
   }
 }
 
-export function findProjectRootSync(cwd, markers = ['.git']) {
+export function findProjectRootSync(cwd, markers = DEFAULT_PROJECT_ROOT_MARKERS, { fallbackToCwd = true } = {}) {
   let current = resolve(cwd);
   while (true) {
     for (const marker of markers) {
       if (existsSync(join(current, marker))) return current;
     }
     const parent = dirname(current);
-    if (parent === current) return undefined;
+    if (parent === current) return fallbackToCwd ? resolve(cwd) : undefined;
     current = parent;
   }
 }

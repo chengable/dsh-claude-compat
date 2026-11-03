@@ -5,7 +5,8 @@
 //   node cc-export.mjs list                     [--cwd <dir>]
 //   node cc-export.mjs export [--cwd <dir>]     [--target <dir>] [--overwrite]
 //
-// "list" prints one line per DSH skill found under <projectRoot>/.dsh/skills.
+// "list" prints one line per DSH skill found under <projectRoot>/.dsh/skills,
+// where <projectRoot> is the nearest ancestor holding .git or CLAUDE.md, else cwd.
 //
 // "export" rewrites each DSH skill into <projectRoot>/.claude/skills/<name>/SKILL.md
 // (Claude Code convention: one directory per skill, containing SKILL.md with
@@ -49,6 +50,10 @@ function yamlValue(v) {
 }
 
 function dshSkillsDir(cwd, markers) {
+  // findProjectRootSync falls back to `cwd` when no marker is found, so a plain
+  // directory counts as its own project root here too — the same rule the skill
+  // and rules providers follow. `root === undefined` only happens for a caller
+  // that opts out of the fallback.
   const root = findProjectRootSync(cwd, markers);
   if (root === undefined) return { root: undefined, dir: undefined };
   return { root, dir: join(root, '.dsh', 'skills') };
@@ -72,14 +77,14 @@ const markers = ['.git'];
 
 if (cmd === 'list') {
   const { root, dir } = dshSkillsDir(cwd, markers);
-  if (root === undefined) { console.log('No project root found (no .git)'); process.exit(0); }
+  if (root === undefined) { console.log('No project root found'); process.exit(0); }
   const skills = walkSkills(dir);
   if (skills.length === 0) { console.log(`No DSH skills in ${dir}`); process.exit(0); }
   for (const s of skills) console.log(`${s.name}\t${relative(root, s.file)}`);
   console.log(`\n${skills.length} skill(s). Export with: node cc-export.mjs export --cwd ${cwd}`);
 } else if (cmd === 'export') {
   const { root, dir } = dshSkillsDir(cwd, markers);
-  if (root === undefined) { console.error('No project root found (no .git)'); process.exit(1); }
+  if (root === undefined) { console.error('No project root found'); process.exit(1); }
   const skills = walkSkills(dir);
   if (skills.length === 0) { console.log(`No DSH skills to export in ${dir}`); process.exit(0); }
   const overwrite = flag('overwrite') !== undefined;

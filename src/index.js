@@ -61,6 +61,7 @@ import { registerManagerCommands } from './commands.js';
 import { discoverPluginContent, readInstalledClaudePlugins, translatePluginMcp } from './plugins.js';
 import {
   CLAUDE_COMPAT_SOURCE_KIND,
+  DEFAULT_PROJECT_ROOT_MARKERS,
   findProjectRoot,
   findProjectRootSync,
   listMdFilesSync,
@@ -74,7 +75,9 @@ export const name = 'claude-compat';
 export const inject = ['skills'];
 
 export const Config = z.object({
-  projectRootMarkers: z.array(z.string()).default(['.git']),
+  // See DEFAULT_PROJECT_ROOT_MARKERS: `.git` alone silently disabled project
+  // discovery for every project that is not a git repository.
+  projectRootMarkers: z.array(z.string()).default([...DEFAULT_PROJECT_ROOT_MARKERS]),
   // DSH dedupes by rank ascending (lower wins). 50 beats the DSH-native
   // project roots (100/200) and the bundled root (600) — project .claude wins
   // every collision. 700 loses to bundled 600 — DSH native wins over
@@ -225,6 +228,8 @@ class ClaudeCompatSkillProvider {
     // is cwd-independent (mirrors DSH's own user-dsh/user-agents roots, which
     // are scanned unconditionally).
     if (cwd !== undefined && cwd !== null) {
+      // findProjectRoot falls back to cwd when no marker is found, so a plain
+      // (non-git) working directory still contributes <cwd>/.claude.
       const projectRoot = await findProjectRoot(cwd, this.config.projectRootMarkers);
       if (projectRoot !== undefined) {
         await this.addRootCandidates(candidates, join(projectRoot, '.claude'), this.source, this.skillRank);
@@ -516,6 +521,8 @@ function buildRulesText(cwd, config, maxBytes) {
     }
   };
   // Project .claude/rules first: wins same-name collisions against ~/.claude.
+  // findProjectRootSync falls back to cwd when no marker is found, so rules also
+  // load from a working directory that is not a git repository.
   const projectRoot = findProjectRootSync(cwd, config.projectRootMarkers);
   if (projectRoot !== undefined) {
     pushRoot(join(projectRoot, '.claude', 'rules'), maxBytes);

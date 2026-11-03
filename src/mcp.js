@@ -87,7 +87,10 @@ function stringDict(v) {
 // launch workspace via process.cwd()-based root discovery; deviating from the
 // per-session cwd rules (which are session-scoped) is intended and documented.
 export async function mountMcpServers(ctx, config) {
-  const projectRoot = findProjectRootSync(process.cwd(), config.projectRootMarkers);
+  // Root-scoped on purpose: `.mcp.json` is mounted for the process lifetime from
+  // the launch workspace, so a cwd fallback would mount a server set that does
+  // not belong to any project (the DSH process may start anywhere).
+  const projectRoot = findProjectRootSync(process.cwd(), config.projectRootMarkers, { fallbackToCwd: false });
   if (projectRoot === undefined) return;
   const mcpPath = join(projectRoot, '.mcp.json');
   if (!(await pathExists(mcpPath))) return;

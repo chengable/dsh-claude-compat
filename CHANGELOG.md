@@ -4,6 +4,17 @@ English | [简体中文](CHANGELOG.zh-CN.md)
 
 All notable changes to this project are documented here. Versions follow [SemVer](https://semver.org/).
 
+## [1.0.1] — 2026-11-03
+
+### Fixed
+- **Project-scoped discovery no longer disappears in a non-git working directory.** `findProjectRoot()` returned `undefined` once it reached the filesystem root without finding a marker, so `list()` and the rules injector skipped `<projectRoot>/.claude/{skills,commands,agents,rules}` entirely — no entries, no warning. Claude Code itself has no such requirement: `claude` reads `.claude/` from a plain directory too. Both helpers now fall back to the session cwd when no marker matches, which is exactly what DSH's own `dsh-skill-filesystem` does for its project roots. `projectRootMarkers` also defaults to `[".git", "CLAUDE.md"]`, so a session opened in a subdirectory still resolves the project root.
+- **A plugin manifest that omits `skills` / `commands` no longer hides the plugin's content.** The discovery code treated a present-but-empty field as "this plugin ships nothing", so any marketplace plugin relying on the conventional layout contributed zero skills — silently. This dropped 22 skills from `claude-mem`, and the skills of `skill-creator`, `plugin-dev`, `agent-morph`, `claude-evol`, `codex`, `minimax-skills` and `minimalist-entrepreneur`. An absent field now means `<installPath>/skills` / `<installPath>/commands`, matching the no-manifest branch and Claude Code's optional-field semantics. `pluginSkillDirs()` / `pluginCommandsDir()` are exported so the rule is unit-tested.
+- The process-lifetime `.mcp.json` mount opts out of the cwd fallback (`fallbackToCwd: false`): it stays root-scoped, because the DSH process can be launched from any directory.
+- `/cc-export` reports `No DSH skills in <dir>` for a marker-less directory instead of `No project root found (no .git)`, since such a directory is now its own project root.
+
+### Tests
+- `test/v101.test.js`: marker fallback (async + sync), nearest-marker precedence, `CLAUDE.md` as a default marker, `fallbackToCwd: false`, the plugin skill/command dir rules (manifest with/without/declared/empty), user-scope-only plugin records, and an end-to-end `discoverPluginContent` case for a manifest without `skills` (skipped when the DSH peer packages are absent).
+
 ## [1.0.0] — 2026-10-30
 
 ### Added

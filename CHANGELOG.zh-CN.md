@@ -4,6 +4,17 @@
 
 本项目所有重要变更记录于此。版本遵循 [SemVer](https://semver.org/)。
 
+## [1.0.1] — 2026-11-03
+
+### 修复
+- **非 git 工作目录下项目级发现不再整体消失。** `findProjectRoot()` 在逐级向上直到文件系统根仍未命中标记时返回 `undefined`，于是 `list()` 与 rules 注入器直接跳过 `<projectRoot>/.claude/{skills,commands,agents,rules}` —— 没有条目、也没有告警。Claude Code 本身不要求这一点：`claude` 在普通目录里同样读取 `.claude/`。现在两个函数在无标记命中时回退到会话 cwd，与 DSH 自身 `dsh-skill-filesystem` 的项目根规则一致。`projectRootMarkers` 默认值同时补上 `CLAUDE.md`，这样会话开在子目录里也能定位到项目根。
+- **插件 manifest 省略 `skills` / `commands` 字段时，不再把这个插件的内容整块吞掉。** 发现逻辑把「字段存在但为空」当成「这个插件什么都没声明」，于是所有依赖约定目录的市场上插件贡献 0 个技能，且完全静默：`claude-mem` 的 22 个技能、以及 `skill-creator`、`plugin-dev`、`agent-morph`、`claude-evol`、`codex`、`minimax-skills`、`minimalist-entrepreneur` 的技能都因此丢失。现在字段缺省即表示 `<installPath>/skills` / `<installPath>/commands`，与「无 manifest」分支及 Claude Code 的可选字段语义一致。新增导出的 `pluginSkillDirs()` / `pluginCommandsDir()`，把这条规则纳入单测。
+- 进程级的 `.mcp.json` 挂载显式退出 cwd 回退（`fallbackToCwd: false`）：它保持根作用域，因为 DSH 进程可能从任意目录启动。
+- `/cc-export` 对无标记目录现在报 `No DSH skills in <dir>`，而不再是 `No project root found (no .git)` —— 这种目录现在就是它自己的项目根。
+
+### 测试
+- 新增 `test/v101.test.js`：标记回退（同步 + 异步）、最近标记优先、`CLAUDE.md` 作为默认标记、`fallbackToCwd: false`、插件技能/命令目录规则（有/无/已声明/空数组）、仅取 user 作用域的安装记录，以及一个针对「manifest 无 skills 字段」的 `discoverPluginContent` 端到端用例（缺 DSH peer 包时自动跳过）。
+
 ## [1.0.0] — 2026-10-30
 
 ### 新增
