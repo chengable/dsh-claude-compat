@@ -164,6 +164,18 @@ runtime context 用的是同一个 API），缓冲只作为兜底。
 排查这类"到底投没投"的问题，看会话日志里 notice 的时间戳：等于 `turn/start`（+1s 左右）
 说明走的是 inbox 渲染路径；等于 `turn/end` 说明是裸 append（不渲染）。
 
+**最关键的坑：`form` 决定能不能渲染（v1.1.5）**。消息"在日志里 + 在模型请求里"都不等于
+"用户看得见"：
+- `source.form: 'notice'` → 客户端走 context-row 渲染器，需要它认识的 producer；未知
+  producer **静默不产生任何行**（桌面端什么都看不到，但日志记录完整）。
+- `source.form: 'hook-context'` → 走 opaque 分支，**一定渲染**。本插件所有注入
+  （SessionStart / UserPromptSubmit 上下文、Stop 提示）统一用这个 form。
+- 判断"某个 form 到底显不显示"最快的方法：找一个**已经在页面上能看到的**同类消息，
+  抄它的 source 形状（本轮里每段 `# Work state` / `# [dsh-claude-compat] recent context`
+  就是可见样板）。
+- 另：DSH 当前版本没有给插件的弹窗/通知（toast）API，插件可见通道只有「会话消息」和
+  「工具结果」，不要让需求按"弹窗"设计。
+
 另外：验证"改动是否生效"时，先看进程启动时间 vs 部署时间 —— 这类问题十有八九是
 进程还跑着旧代码，而不是逻辑错了（本次连续三次都是这个原因）。
 
