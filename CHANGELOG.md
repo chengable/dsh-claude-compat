@@ -4,6 +4,14 @@ English | [简体中文](CHANGELOG.zh-CN.md)
 
 All notable changes to this project are documented here. Versions follow [SemVer](https://semver.org/).
 
+## [1.0.3] — 2026-11-03
+
+### Changed
+- **`enablePluginMcp` now defaults to `true`.** Mounting the MCP servers that installed Claude Code plugins declare used to require a profile `cordis.patch.yml` row. A profile row does not survive a plugin reinstall — the patch layer is repaired or replaced and the plugin silently returned to "no plugin MCP servers", with no message. The wanted configuration now lives in the schema, so it is restored by the install itself. Set `enablePluginMcp: false` to keep plugin MCP servers off.
+
+### Tests
+- `test/v103.test.js` pins the defaults (`enablePluginMcp`, `projectRootMarkers`, the skill/rules surface) so a reinstall cannot regress them back to opt-in.
+
 ## [1.0.2] — 2026-11-03
 
 ### Fixed

@@ -107,13 +107,17 @@ export const Config = z.object({
   aliasDescriptionPrefix: z.boolean().default(true),
   // Claude Code plugin-marketplace installs (~/.claude/plugins). Skills,
   // commands and agents surface at pluginSkillRank (750: the long tail —
-  // everything else wins collisions). Plugin MCP servers are opt-in via
-  // enablePluginMcp (mounting third-party MCP is a bigger trust step).
+  // everything else wins collisions).
   enablePlugins: z.boolean().default(true),
   pluginSkillRank: z.number().default(750),
   pluginSkillSource: z.string().default('claude-plugin'),
   pluginsRoot: z.string().default('~/.claude/plugins'),
-  enablePluginMcp: z.boolean().default(false),
+  // Mount the MCP servers that installed plugins declare (`.mcp.json` or a
+  // manifest `mcpServers`). Defaults to true in this fork: a Claude Code user
+  // already trusts these plugins, and requiring a profile patch to opt in meant
+  // every reinstall silently dropped the setting along with the patch row.
+  // Set `enablePluginMcp: false` to keep plugin MCP servers off.
+  enablePluginMcp: z.boolean().default(true),
   // Print a one-shot "star it" nudge on the first activation (default true).
   enableStarNudge: z.boolean().default(true),
 });

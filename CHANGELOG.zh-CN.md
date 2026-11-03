@@ -4,6 +4,14 @@
 
 本项目所有重要变更记录于此。版本遵循 [SemVer](https://semver.org/)。
 
+## [1.0.3] — 2026-11-03
+
+### 变更
+- **`enablePluginMcp` 默认值改为 `true`。** 此前要挂载已安装 Claude Code 插件声明的 MCP server，必须在 profile 的 `cordis.patch.yml` 里写一行配置。而 profile 的 patch 行不会随插件重装保留 —— patch 层被修复或替换后，插件会静默回到「不挂载插件 MCP」，且没有任何提示。现在这个期望直接落在 schema 默认值里，装完即生效。想要关闭，显式设 `enablePluginMcp: false`。
+
+### 测试
+- 新增 `test/v103.test.js`：锁住各项默认值（`enablePluginMcp`、`projectRootMarkers`、技能与规则开关），确保重装不会把它退回「需要手工开启」的状态。
+
 ## [1.0.2] — 2026-11-03
 
 ### 修复
