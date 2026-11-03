@@ -197,6 +197,10 @@ runtime context 用的是同一个 API），缓冲只作为兜底。
 
 - 提交信息用中文，`type(scope): 标题`；正文按「问题 → 改法 → 验证」写。破坏性变更用 `feat!:` 并在正文写 `BREAKING CHANGE:`（参考 `349929f`）。
 - 版本号和 CHANGELOG 一起提。纯测试/文档改动走 patch 版本也可以（1.0.4 就是这么来的）。
+- **别用 `git add -A` 盲提**：这个仓库自己会跑 Claude Code 插件 hooks，`.claude/.claude-evol/`、
+  `.agent-morph-state.json` 这类运行态副作用文件会在工作树里不断变化。它们已在 `.gitignore`
+  里，但 `-A` 仍可能把新出现的同类文件扫进来（曾把会话计数提交进仓库）。提交前扫一眼
+  `git status`，或按路径 `git add <file>`。
 - 发版三步：
 
 ```bash
