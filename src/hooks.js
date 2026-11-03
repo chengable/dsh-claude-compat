@@ -34,7 +34,8 @@
 // parsed and skipped with a warning, like the reference bridges.
 
 import { execFile } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import {
@@ -662,48 +663,36 @@ export function registerHooks(ctx, config) {
     source: { kind: CLAUDE_COMPAT_SOURCE_KIND, form: 'notice', summary: text.slice(0, 160) },
   }));
 
-  /**
-   * Append a notice straight to the session surface — the same call DSH itself
-   * uses for runtime context — so it shows up at the end of THIS turn. Without
-   * it a notice waits for the next prompt and dies with the process on restart.
-   * Returns false when the session cannot take the append (then we fall back).
-   */
-  const appendNoticeNow = (agent, texts) => {
-    if (config.surfaceHookOutput === false || texts.length === 0) return false;
-    const session = agent?.session;
-    if (typeof session?.append !== 'function') return false;
-    let appended = false;
-    for (const raw of texts) {
-      const text = stripAnsi(raw);
-      if (text.trim() === '') continue;
-      try {
-        session.append('user/message',
-          createUserMessage({
-            content: [{ type: 'text', text }],
-            source: { kind: CLAUDE_COMPAT_SOURCE_KIND, form: 'notice', summary: text.slice(0, 160) },
-          }),
-          { surfaceOp: 'append' });
-        appended = true;
-      } catch {
-        return false;
-      }
-    }
-    return appended;
-  };
+  // Notices ride the inbox (a claimed user message) because that is the path the
+  // web client renders as its own bubble; a bare `session.append` lands in the
+  // log and in the next request but is not shown live. The queue is persisted so
+  // a restart between the Stop and the next prompt cannot swallow it.
+  const noticeFile = (agent) => join(tmpdir(), 'dsh-claude-compat', `${agentSessionId(agent)}.json`);
 
   const queueNotices = (agent, texts) => {
     if (config.surfaceHookOutput === false || texts.length === 0) return;
+    const clean = texts.map(stripAnsi).filter((text) => text.trim() !== '');
+    if (clean.length === 0) return;
     const key = agentSessionId(agent);
-    const list = pendingNotices.get(key) ?? [];
-    list.push(...texts);
+    const list = [...(pendingNotices.get(key) ?? []), ...clean];
     pendingNotices.set(key, list);
+    try {
+      const file = noticeFile(agent);
+      mkdirSync(join(tmpdir(), 'dsh-claude-compat'), { recursive: true });
+      writeFileSync(file, JSON.stringify({ pending: list }, null, 2));
+    } catch { /* persistence is best-effort */ }
   };
 
   const drainNotices = (agent) => {
     const key = agentSessionId(agent);
-    const list = pendingNotices.get(key);
-    if (list === undefined) return [];
+    let list = pendingNotices.get(key);
+    if (list === undefined) {
+      // A previous process queued them; pick them up after a restart.
+      try { list = JSON.parse(readFileSync(noticeFile(agent), 'utf8'))?.pending; } catch { list = undefined; }
+    }
+    if (list === undefined || list.length === 0) return [];
     pendingNotices.delete(key);
+    try { rmSync(noticeFile(agent), { force: true }); } catch { /* best-effort */ }
     return noticeOf(list);
   };
 
@@ -774,11 +763,8 @@ export function registerHooks(ctx, config) {
     const agent = event?.agent;
     const { merged } = await runEvent('Stop', '', (cwd) => stopPayload(agent, cwd), agent);
     // A Stop hook's stdout is a user-facing note in Claude Code (e.g. claude-evol's
-    // review-threshold reminder). Show it now; only buffer it when the session
-    // cannot take an append.
-    if (!appendNoticeNow(agent, merged.messages ?? [])) {
-      queueNotices(agent, merged.messages ?? []);
-    }
+    // review-threshold reminder). Queue it for the next prompt — the rendered path.
+    queueNotices(agent, merged.messages ?? []);
     if (merged.decision === 'deny' || merged.stop === true) {
       const text = merged.reason ?? merged.stopReason ?? 'continue: blocked by Stop hook';
       if (typeof agent?.steer === 'function') {

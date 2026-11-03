@@ -4,6 +4,11 @@ English | [简体中文](CHANGELOG.zh-CN.md)
 
 All notable changes to this project are documented here. Versions follow [SemVer](https://semver.org/).
 
+## [1.1.4] — 2026-11-03
+
+### Fixed
+- **Hook notices render again, and survive a restart.** v1.1.3 appended the notice straight to the session surface (`surfaceOp: 'append'`): it reached the log and the model's next request, but the web client does not render that as its own notice bubble, so nothing was visible. The inbox path (a claimed user message) is the one that renders, so notices are queued for the next prompt again — and the queue is now persisted per session, so a restart between the Stop and the next prompt no longer loses it.
+
 ## [1.1.3] — 2026-11-03
 
 ### Fixed

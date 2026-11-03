@@ -388,37 +388,37 @@ test('wiring: notice text is stripped of terminal color codes', async () => {
   assert.equal(text, '🧬 colored notice', 'escape sequences are stripped before display');
 });
 
-test('wiring: a Stop notice is appended to the session immediately when possible', async () => {
-  // Restarting wipes an in-memory queue, so the notice must land in THIS turn.
-  const project = sandbox('dcc-notice-now-');
+test('wiring: a Stop notice survives a restart and renders on the next prompt', async () => {
+  // The rendered path is inbox delivery (a claimed user message); it must also
+  // survive the process boundary, which a memory-only queue does not.
+  const project = sandbox('dcc-notice-persist-');
   mkdirSync(join(project, '.git'));
   writeJson(join(project, '.claude', 'settings.json'), {
-    hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo \'{"systemMessage":"threshold reached"}\'' }] }] },
+    hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo \'{"systemMessage":"persisted notice"}\'' }] }] },
   });
-  const listeners = new Map();
-  const appended = [];
-  registerHooks({ on: (n, f) => { listeners.set(n, f); return () => {}; }, get: () => undefined },
+  const agent = { session: { header: { id: 'session-persist-1', cwd: project } } };
+
+  const first = new Map();
+  registerHooks({ on: (n, f) => { first.set(n, f); return () => {}; }, get: () => undefined },
     { userClaudeDir: join(project, 'nouser'), pluginsRoot: join(project, 'noplugins') });
   invalidateHookCache();
+  await first.get('agent/turn-stopping')({ agent, turn: 1, signal: new AbortController().signal });
 
-  const agent = {
-    session: {
-      header: { id: 'session-now', cwd: project },
-      append: (type, message, opts) => { appended.push({ type, message, opts }); return {}; },
-    },
-  };
-  await listeners.get('agent/turn-stopping')({ agent, turn: 1, signal: new AbortController().signal });
-
-  assert.equal(appended.length, 1, 'appended at the turn boundary, not deferred');
-  assert.equal(appended[0].type, 'user/message');
-  assert.deepEqual(appended[0].opts, { surfaceOp: 'append' });
-  assert.equal(appended[0].message.source.form, 'notice');
-  assert.equal(appended[0].message.content[0].text, 'threshold reached');
-
-  // And it must NOT also be queued for the next prompt.
-  const next = await listeners.get('agent/pre-step')(
+  // Simulate a restart: fresh listener set (fresh in-memory queue), same session.
+  const second = new Map();
+  registerHooks({ on: (n, f) => { second.set(n, f); return () => {}; }, get: () => undefined },
+    { userClaudeDir: join(project, 'nouser'), pluginsRoot: join(project, 'noplugins') });
+  const d = await second.get('agent/pre-step')(
     { agent, messages: [{ content: [{ type: 'text', text: 'hi' }] }] },
     async () => ({ kind: 'enter', messages: [] }),
   );
-  assert.deepEqual(next.messages, [], 'no duplicate delivery on the next prompt');
+  const texts = (d.messages ?? []).flatMap((m) => m.content.map((c) => c.text));
+  assert.ok(texts.includes('persisted notice'), `notice survived the restart, got ${JSON.stringify(texts)}`);
+
+  // Drained exactly once: a third prompt sees nothing.
+  const again = await second.get('agent/pre-step')(
+    { agent, messages: [{ content: [{ type: 'text', text: 'again' }] }] },
+    async () => ({ kind: 'enter', messages: [] }),
+  );
+  assert.deepEqual(again.messages, []);
 });
