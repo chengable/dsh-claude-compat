@@ -658,9 +658,14 @@ export function registerHooks(ctx, config) {
   // `\u001b[1m\u001b[93m` would surface as garbage in the transcript.
   const stripAnsi = (text) => text.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
 
+  // Deliberately NOT `form: 'notice'`: the desktop client routes a declared
+  // notice through its context-row renderer, which silently drops a source it
+  // does not know a producer for. `hook-context` is the form the same plugin
+  // already uses for SessionStart/UserPromptSubmit context — those render as an
+  // opaque block, which is visible. Empirically the only form that shows up.
   const noticeOf = (texts) => texts.map((raw) => stripAnsi(raw)).filter((text) => text.trim() !== '').map((text) => createUserMessage({
     content: [{ type: 'text', text }],
-    source: { kind: CLAUDE_COMPAT_SOURCE_KIND, form: 'notice', summary: text.slice(0, 160) },
+    source: { kind: CLAUDE_COMPAT_SOURCE_KIND, form: 'hook-context' },
   }));
 
   // Notices ride the inbox (a claimed user message) because that is the path the

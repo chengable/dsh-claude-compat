@@ -4,6 +4,11 @@
 
 本项目所有重要变更记录于此。版本遵循 [SemVer](https://semver.org/)。
 
+## [1.1.5] — 2026-11-03
+
+### 修复
+- **hook 提示在桌面端真正可见了。** 之前用 `source.form: 'notice'` 投递，而客户端会把声明为 notice 的消息交给上下文行渲染器——它需要一个它认识的 producer。未知 producer 会静默地不产生任何行，于是消息虽然写在会话日志里、也在模型的下一轮请求里，页面上却什么都没有。现在改用 `form: 'hook-context'`，也就是本插件给 SessionStart / UserPromptSubmit 上下文用的同一个 form，它会渲染成 opaque 块（每轮开头那几段 claude-mem 上下文就是这条路径）。
+
 ## [1.1.4] — 2026-11-03
 
 ### 修复

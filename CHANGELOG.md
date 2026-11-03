@@ -4,6 +4,11 @@ English | [简体中文](CHANGELOG.zh-CN.md)
 
 All notable changes to this project are documented here. Versions follow [SemVer](https://semver.org/).
 
+## [1.1.5] — 2026-11-03
+
+### Fixed
+- **Hook notices are actually visible in the desktop client.** They were delivered with `source.form: 'notice'`, and the client routes a declared notice through its context-row renderer — which needs a producer it recognizes. An unknown producer silently produced no row, so the message existed in the session log and in the model's request while the page showed nothing. Notices now use `form: 'hook-context'`, the same form this plugin already uses for SessionStart / UserPromptSubmit context, which renders as an opaque block (the claude-mem blocks at the top of every turn are that path).
+
 ## [1.1.4] — 2026-11-03
 
 ### Fixed

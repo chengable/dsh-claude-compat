@@ -354,7 +354,9 @@ test('wiring: a Stop hook notice reaches the next prompt as a notice message', a
   const texts = decision.messages.flatMap((m) => m.content.map((c) => c.text));
   assert.ok(texts.includes('review threshold reached'), `notice delivered, got ${JSON.stringify(texts)}`);
   const notice = decision.messages.find((m) => m.content.some((c) => c.text === 'review threshold reached'));
-  assert.equal(notice.source.form, 'notice');
+  // `hook-context` (not `notice`): the desktop client drops a declared notice
+  // whose source it has no producer for, which made the message invisible.
+  assert.equal(notice.source.form, 'hook-context');
   assert.equal(notice.source.kind, 'plugin:dsh-claude-compat');
 
   // The buffer is drained: a second prompt must not repeat it.
