@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import {
   collectHookSources,
+  registerHooks,
   compileMatcher,
   decodeHookOutput,
   flattenHooks,
@@ -320,4 +321,46 @@ test('hook chatter is decoded and merged as a user-visible notice', () => {
   ]);
   assert.deepEqual(json.messages, []);
   assert.deepEqual(json.additionalContext, ['ctx']);
+});
+
+test('wiring: a Stop hook notice reaches the next prompt as a notice message', async () => {
+  // Real path: Stop hook prints {"systemMessage": …} → queued at turn-stopping →
+  // delivered with the next prompt. Exercises registerHooks, not just the codec.
+  const project = sandbox('dcc-notice-');
+  mkdirSync(join(project, '.git'));
+  writeJson(join(project, '.claude', 'settings.json'), {
+    hooks: {
+      Stop: [{ hooks: [{ type: 'command', command: 'echo \'{"systemMessage":"review threshold reached"}\'' }] }],
+    },
+  });
+
+  const listeners = new Map();
+  const ctx = {
+    on: (name, fn) => { listeners.set(name, fn); return () => {}; },
+    get: () => undefined,
+  };
+  invalidateHookCache();
+  registerHooks(ctx, { userClaudeDir: join(project, 'nouser'), pluginsRoot: join(project, 'noplugins') });
+
+  const agent = { session: { header: { id: 'session-wiring', cwd: project } } };
+  await listeners.get('agent/turn-stopping')({ agent, turn: 1, signal: new AbortController().signal });
+
+  // Next prompt: the notice must ride along with the claimed messages.
+  const decision = await listeners.get('agent/pre-step')(
+    { agent, messages: [{ content: [{ type: 'text', text: 'hi' }] }] },
+    async () => ({ kind: 'enter', messages: [{ content: [{ type: 'text', text: 'hi' }] }] }),
+  );
+  assert.equal(decision.kind, 'enter');
+  const texts = decision.messages.flatMap((m) => m.content.map((c) => c.text));
+  assert.ok(texts.includes('review threshold reached'), `notice delivered, got ${JSON.stringify(texts)}`);
+  const notice = decision.messages.find((m) => m.content.some((c) => c.text === 'review threshold reached'));
+  assert.equal(notice.source.form, 'notice');
+  assert.equal(notice.source.kind, 'plugin:dsh-claude-compat');
+
+  // The buffer is drained: a second prompt must not repeat it.
+  const second = await listeners.get('agent/pre-step')(
+    { agent, messages: [{ content: [{ type: 'text', text: 'again' }] }] },
+    async () => ({ kind: 'enter', messages: [] }),
+  );
+  assert.deepEqual(second.messages, []);
 });
