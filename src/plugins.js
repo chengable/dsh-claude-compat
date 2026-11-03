@@ -27,9 +27,12 @@ import { translateMcpServers } from './mcp.js';
 import { resolveCandidateName, warnUnmapped } from './aliases.js';
 
 // Parse installed_plugins.json → [{ key, name, marketplace, installPath,
-// version }] for scope==='user' entries. Dedupe per key, keeping the last
-// entry (Claude Code appends reinstall records; last is freshest).
-export function readInstalledClaudePlugins(pluginsRoot) {
+// version }]. Records append on reinstall and on scope changes, so the last
+// record wins; a plugin installed for one project only (`scope: 'project'`) is
+// still a real install and must not be dropped. Plugins Claude Code has
+// disabled (`settings.json` → `enabledPlugins: { '<key>': false }`) are skipped:
+// the manager surface offers disable, so disable has to actually work.
+export function readInstalledClaudePlugins(pluginsRoot, { settingsPath } = {}) {
   const root = resolveUserClaudeDir(pluginsRoot === undefined ? '~/.claude/plugins' : pluginsRoot);
   const manifestPath = join(root, 'installed_plugins.json');
   let parsed;
@@ -38,11 +41,16 @@ export function readInstalledClaudePlugins(pluginsRoot) {
   if (typeof parsed !== 'object' || parsed === null) return [];
   const plugins = parsed.plugins;
   if (typeof plugins !== 'object' || plugins === null || Array.isArray(plugins)) return [];
+  const enabled = readEnabledPlugins(settingsPath ?? join(root, '..', 'settings.json'));
   const byKey = new Map();
   for (const [key, entries] of Object.entries(plugins)) {
     if (!Array.isArray(entries)) continue;
-    const record = entries.findLast((e) => e?.scope === 'user');
+    // Prefer a user-scope record (the plugin is globally installed); otherwise
+    // take the last record of any scope.
+    const record = entries.findLast((e) => e?.scope === 'user')
+      ?? entries.findLast((e) => typeof e?.installPath === 'string');
     if (record === undefined || typeof record.installPath !== 'string') continue;
+    if (enabled.get(key) === false) continue;
     const at = key.lastIndexOf('@');
     byKey.set(key, {
       key,
@@ -53,6 +61,20 @@ export function readInstalledClaudePlugins(pluginsRoot) {
     });
   }
   return [...byKey.values()];
+}
+
+/** `settings.json` → Map(pluginKey → enabled). A missing key means enabled. */
+function readEnabledPlugins(settingsPath) {
+  const map = new Map();
+  let parsed;
+  try { parsed = JSON.parse(claReadSync(settingsPath)); } catch { return map; }
+  const enabled = parsed?.enabledPlugins;
+  if (typeof enabled === 'object' && enabled !== null && !Array.isArray(enabled)) {
+    for (const [key, value] of Object.entries(enabled)) {
+      if (value === false) map.set(key, false);
+    }
+  }
+  return map;
 }
 
 // readFileSync kept local so readInstalledClaudePlugins stays sync-simple.
@@ -85,25 +107,31 @@ export async function discoverPluginContent(pluginsRoot, providerName, source, r
     // resolved by registry dedupe (skills are emitted first, so the skill wins,
     // mirroring Claude Code's own behavior).
     const seenByKind = { skills: new Set(), commands: new Set(), agents: new Set() };
+    // DSH skill names cannot carry Claude Code's `plugin:skill` namespace, so
+    // the plugin name is surfaced in the description instead. Without it two
+    // plugins shipping the same skill name (real case: `skill-creator` in
+    // claude-plugins-official and document-skills) are indistinguishable and the
+    // loser silently disappears at dedupe.
+    const origin = `[${plugin.name}] `;
     const push = (kind) => (batch) => {
       for (const c of batch) {
         if (seenByKind[kind].has(c.name)) continue;
         seenByKind[kind].add(c.name);
-        out.push(c);
+        out.push({ ...c, description: `${origin}${c.description}` });
       }
     };
-    // A manifest that omits `skills` still describes the standard Claude Code
-    // plugin layout: the skills live in <installPath>/skills. Only a manifest
-    // that actually lists dirs replaces the default scan — previously an omitted
-    // field produced an empty list and dropped every skill of the plugin without
-    // a warning (claude-mem ships 22 skills that way).
+    // Claude Code ADDS a manifest's directories to the conventional layout, so
+    // both are scanned (see pluginSkillDirs / pluginCommandsDirs).
     for (const dir of pluginSkillDirs(manifest, installPath)) {
       push('skills')(await discoverSkills(dir, providerName, source, rank, aliasOptions));
     }
-    push('commands')(await patchedCommands(pluginCommandsDir(manifest, installPath)));
+    for (const dir of pluginCommandsDirs(manifest, installPath)) {
+      push('commands')(await patchedCommands(dir));
+    }
     if (enableAgents !== false) {
-      const agentsDir = join(installPath, 'agents');
-      if (await pathExists(agentsDir)) push('agents')(await discoverAgents(agentsDir, providerName, source, rank, aliasOptions));
+      for (const dir of pluginAgentDirs(manifest, installPath)) {
+        if (await pathExists(dir)) push('agents')(await discoverAgents(dir, providerName, source, rank, aliasOptions));
+      }
     }
   }
   return out;
@@ -178,17 +206,35 @@ function manifestDirs(manifest, field, installPath) {
  * @returns Absolute skill root directories, in scan order.
  */
 export function pluginSkillDirs(manifest, installPath) {
-  const declared = manifest === undefined ? [] : manifestDirs(manifest, 'skills', installPath);
-  return declared.length > 0 ? declared : [join(installPath, 'skills')];
+  // Claude Code ADDS the declared directories to the conventional `skills/`
+  // scan; it does not replace it. Replacing it silently dropped any skill a
+  // plugin added to `skills/` after declaring a custom directory.
+  const dirs = [join(installPath, 'skills')];
+  if (manifest !== undefined) dirs.push(...manifestDirs(manifest, 'skills', installPath));
+  return [...new Set(dirs)];
 }
 
 /**
- * Directory to scan for one plugin's commands. A manifest `commands` string wins;
- * an absent field means the standard `<installPath>/commands` layout.
+ * Directories to scan for one plugin's commands.
+ *
+ * Claude Code accepts a string OR an array here. Only the string form used to
+ * be read, so a plugin declaring `["./.claude/commands", "./commands"]` lost its
+ * real commands (the conventional directory held only Codex `.toml` files).
  */
+export function pluginCommandsDirs(manifest, installPath) {
+  const declared = manifest === undefined ? [] : manifestDirs(manifest, 'commands', installPath);
+  return declared.length > 0 ? declared : [join(installPath, 'commands')];
+}
+
+/** Back-compat single-directory view (first declared, else the convention). */
 export function pluginCommandsDir(manifest, installPath) {
-  if (manifest !== undefined && typeof manifest.commands === 'string') return resolve(installPath, manifest.commands);
-  return join(installPath, 'commands');
+  return pluginCommandsDirs(manifest, installPath)[0];
+}
+
+/** Directories to scan for one plugin's agents (manifest `agents` wins). */
+export function pluginAgentDirs(manifest, installPath) {
+  const declared = manifest === undefined ? [] : manifestDirs(manifest, 'agents', installPath);
+  return declared.length > 0 ? declared : [join(installPath, 'agents')];
 }
 
 /**
@@ -208,11 +254,19 @@ export function pluginCommandsDir(manifest, installPath) {
  */
 export function translatePluginMcp(manifest, installPath, opts = {}) {
   const ref = manifest?.mcpServers;
-  const fromText = (raw) => translateMcpServers(
-    raw.replaceAll('${CLAUDE_PLUGIN_ROOT}', installPath), opts);
+  // `translateMcpServers` owns `${CLAUDE_PLUGIN_ROOT}` / `${CLAUDE_PROJECT_DIR}`
+  // expansion, so the inline, path-string and conventional shapes all get it.
+  // `pluginName` namespaces this plugin's servers as `plugin_<name>_<server>`,
+  // which is the prefix Claude Code gives permission rules and hook matchers.
+  const common = {
+    ...opts,
+    pluginRoot: installPath,
+    ...(opts.pluginName !== undefined ? { serverPrefix: opts.pluginName } : {}),
+  };
+  const fromText = (raw) => translateMcpServers(raw, common);
 
   if (typeof ref === 'object' && ref !== null && !Array.isArray(ref)) {
-    return translateMcpServers(JSON.stringify({ mcpServers: ref }), opts);
+    return translateMcpServers(JSON.stringify({ mcpServers: ref }), common);
   }
   if (typeof ref === 'string') {
     const raw = readTextSafeSync(resolve(installPath, ref));

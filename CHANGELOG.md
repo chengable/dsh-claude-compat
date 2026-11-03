@@ -4,6 +4,28 @@ English | [简体中文](CHANGELOG.zh-CN.md)
 
 All notable changes to this project are documented here. Versions follow [SemVer](https://semver.org/).
 
+## [1.1.0] — 2026-11-03
+
+### Added
+- **Claude Code hooks run natively — no second plugin needed.** All nine events the harness has a seam for are bridged: `SessionStart` (context injection), `UserPromptSubmit` (block / add context), `PreToolUse` (deny / ask), `PostToolUse` and `PostToolUseFailure` (block / add context), `Stop` (force another step), `SubagentStart` / `SubagentStop`, and `SessionEnd`. Sources: `~/.claude/settings.json`, `<project>/.claude/settings.json`, `<project>/.claude/settings.local.json`, and every installed plugin's `hooks/hooks.json` (or the files its manifest `hooks` field names) — plugin hooks used to be invisible, which is why hook-driven plugins such as claude-mem could never work here. A plugin hook's `${CLAUDE_PLUGIN_ROOT}` is substituted and exported to its process.
+- **Hook semantics now match Claude Code.** Payloads carry the real field set (`session_id`, `transcript_path`, `cwd`, `hook_event_name`, per-event fields) with the trailing newline; commands run in the session workspace with `CLAUDE_PROJECT_DIR` exported; matchers use Claude's dialect (word-and-`|` = literal alternation, anything else = unanchored regex); decisions follow the reference mapping (exit 2 blocks with stderr as the reason, `hookSpecificOutput.permissionDecision` allow/deny/ask, `additionalContext` injected, `continue: false` halts, `async: true` runs detached). `Notification`, `PreCompact` and `Setup` have no seam and are reported instead of dropped.
+- **MCP: the whole Claude Code scope hierarchy.** Local (`~/.claude.json` → `projects[<path>].mcpServers`), project (`.mcp.json`), user (`~/.claude.json` → `mcpServers`) and plugin servers are collected and merged with Claude Code's precedence (a higher scope wins the whole entry). Plugin servers are namespaced `plugin_<plugin>_<server>` so permission rules and hook matchers written for Claude Code keep matching.
+
+### Fixed
+- **Project-scoped hooks and `.mcp.json` were silently invisible in the desktop app.** Both resolved from `process.cwd()`, and a DSH host runs from its profile directory — so a project's `.claude/settings.json` and `.mcp.json` were never found, with no log line. Both now resolve from the **session workspace**, and the first session supplies it when startup has none.
+- **Hook configs are read per workspace and cached**, invalidated by `/reload-cc-plugins`; editing settings or installing a plugin no longer needs a process restart to be seen (previously read once at activation).
+- **MCP variable expansion**: `${VAR}`, `${VAR:-default}`, `${CLAUDE_PROJECT_DIR}`, `${CLAUDE_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_DATA}` are expanded in command/args/env/url/headers, with Claude Code's guard that blanks credential variables in remote URLs/headers. An inline manifest `mcpServers` had bypassed substitution entirely (the CHANGELOG had promised otherwise since 1.0.2).
+- **MCP fields the layer used to ignore**: `timeout` (was hard-coded to 60 s), `disabled`, and the transports DSH lacks — `ws`/`sdk` are skipped with a warning, legacy `sse` mounts as streamable-http with a warning, and a `url` without `type` warns instead of silently mounting.
+- **MCP collisions are deterministic**: one module-level mount registry plus sequential mounting replaces two racing fire-and-forget mounts, so a project server and a plugin server can no longer both register the same name; truncated server names now keep a hash so two long names stay distinct.
+- **Plugin `commands` as an array was ignored** — a real plugin declaring `["./.claude/commands", "./commands"]` lost all eight of its commands. Arrays are honored for skills, commands and agents, and a declared `skills` field now ADDS to the conventional `skills/` scan instead of replacing it.
+- **`enabledPlugins: false` is honored**, so `/cc-plugin disable` actually disables a plugin (its skills, commands, agents, hooks and MCP servers); project-scope-only plugin installs are surfaced instead of dropped.
+- **`disable-model-invocation` and `argument-hint` now apply to `.claude/commands`**, and a command using `$ARGUMENTS` says where the arguments are instead of leaking the literal placeholder.
+- **Skills without a `description` are kept** (described by their first body line, as Claude Code does) instead of being dropped, and `when_to_use` is read alongside `whenToUse`.
+- **`.claude/agents` keep more than a body**: the delegation header now carries the agent's `model`, `tools` and `skills`.
+
+### Tests
+- `test/v110.test.js` (hooks: sources, plugin discovery, workspace resolution, payloads, codec, merge), `test/v111.test.js` (MCP: expansion, transports, scopes, precedence, namespacing) and `test/v112.test.js` (plugin components, `enabledPlugins`, command arguments, agent header). Suite: 96 tests, all green.
+
 ## [1.0.4] — 2026-11-03
 
 ### Tests

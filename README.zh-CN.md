@@ -117,7 +117,8 @@ dsh plugin --profile web add github:biedongbin/dsh-claude-compat
 | `enableRules` | `true` | 注入项目 + `~/.claude` 的 `rules/*.md` 到消息流 |
 | `enableMcp` | `true` | 把 `<projectRoot>/.mcp.json` 翻译为挂载的 MCP 服务器插件 |
 | `mcpFailOnStartupError` | `false` | 转发给 `dsh-mcp-client`：MCP 服务器连接失败时让插件启动失败 |
-| `enableHooks` | `true` | 运行 `.claude/settings.json` hooks（Pre/PostToolUse、UserPromptSubmit） |
+| `enableHooks` | `true` | 运行 Claude Code hooks（settings 文件，以及每个已安装插件的 `hooks/hooks.json`） |
+| `enablePluginHooks` | `true` | 运行插件自带的 hooks（设为 `false` 则只跑 settings 文件里的） |
 | `hooksTimeoutMs` | `60000` | 单个 hook 运行超时（UserPromptSubmit 无论如何上限 10s） |
 | `enableAgents` | `true` | 把 `.claude/agents/*.md` 暴露为委派 shim skill |
 | `skillAliases` | `{}` | 非 kebab 名（中文等）→ ASCII slug 的映射，如 `{ "三脑": "san-nao" }`。见下方「中文 / 非 ASCII 技能名」 |
@@ -163,6 +164,19 @@ skillAliases:
 - **合法名永远压过映射**：本来就能加载的技能不会被 alias 改名。
 - 别名条目沿用原 provider 的 rank，所以与 DSH 原生或 `~/.agents` 同名时，按原有优先级去重（`~/.claude` 的 alias 输给 `~/.agents` 同名项，不会顶掉它）。想让 `~/.claude` 赢就把 `userSkillRank` 调到 500 以下。
 - 没配映射的非 kebab 名不再静默消失：每个文件每进程告警一次，并直接给出可粘贴的映射示例。
+
+## 已知限制
+
+以下是 Claude Code 有、但当前 DSH 没有承载面的能力。写在这里，避免被当成 bug：
+
+- **命令与技能里的 `$ARGUMENTS` / `$1` / `$N`**：DSH 的 `skill` 工具只有 `name`，没有参数通道。做法是在正文前加一段说明，告诉模型「参数就是用户消息里写的那些」；命令的 `argument-hint` 会拼进 description。要真正做参数替换，得把命令注册成 DSH 原生命令。
+- **`plugin:skill` 命名空间**：DSH 名字不允许 `:`，插件内容以裸名出现，并在 description 前加 `[插件名]` 标识来源。
+- **新式 in-process「mods」插件里的 hooks/mcpServers**：本插件只跑经典 command hooks 与 MCP 配置。
+- **DSH 没有对应接缝的 hook 事件**：`Notification`、`PreCompact`、`Setup`。
+- **DSH 不支持的 MCP 传输**：旧 SSE（告警后按 streamable-http 挂载）、WebSocket 与 `sdk`（告警后跳过）、OAuth 与 `headersHelper`（请改用静态 `headers` token）。
+- **执行类前缀与字段**：命令的 `` !`cmd` `` 预执行、`@file` 引用、`allowed-tools`/`disallowed-tools`、技能级 `model`/`effort`、`context: fork`、`paths` —— DSH 侧都没有对应字段。
+- **catalog 描述宽度**：过长的描述会被 DSH 的 catalog 渲染截断（已有若干内置技能超限）。
+- **agent 执行语义**：`.claude/agents/*.md` 会变成「委派提示」型技能，agent 的 `model`、`tools`、`skills` 写进委派头文本，而不是作为运行时 preset 强制执行。
 
 ## 故障排查
 

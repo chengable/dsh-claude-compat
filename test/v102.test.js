@@ -56,7 +56,10 @@ test('inline manifest mcpServers object is translated', () => {
   }, dir);
   assert.deepEqual(warns, []);
   assert.deepEqual(servers.map((s) => s.serverName), ['search']);
-  assert.deepEqual(servers[0].env, { TOKEN: 'x' });
+  // The plugin root is exposed to the child process as well: several plugins
+  // (claude-mem) read process.env.CLAUDE_PLUGIN_ROOT instead of relying on
+  // `${...}` substitution inside their own command strings.
+  assert.deepEqual(servers[0].env, { TOKEN: 'x', CLAUDE_PLUGIN_ROOT: dir });
 });
 
 test('a path string still wins over the conventional file', () => {

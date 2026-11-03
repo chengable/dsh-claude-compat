@@ -55,7 +55,7 @@ import {
   warnUnmapped,
   withOriginalName,
 } from './aliases.js';
-import { registerHooks } from './hooks.js';
+import { invalidateHookCache, registerHooks } from './hooks.js';
 import { mountMcpServers, mountMcpConfigs } from './mcp.js';
 import { registerManagerCommands } from './commands.js';
 import { discoverPluginContent, readInstalledClaudePlugins, translatePluginMcp } from './plugins.js';
@@ -94,6 +94,11 @@ export const Config = z.object({
   enableMcp: z.boolean().default(true),
   mcpFailOnStartupError: z.boolean().default(false),
   enableHooks: z.boolean().default(true),
+  // Run the `hooks/hooks.json` that installed Claude Code plugins ship (or the
+  // files their manifest's `hooks` field names). On by default: a Claude Code
+  // user already trusts these plugins, and a plugin whose hooks never fire is
+  // silently half-working. Set `false` to run only settings-file hooks.
+  enablePluginHooks: z.boolean().default(true),
   hooksTimeoutMs: z.number().default(60000),
   enableAgents: z.boolean().default(true),
   // Non-ASCII (e.g. Chinese) skill/command/agent names can never satisfy DSH's
@@ -176,28 +181,61 @@ export function apply(ctx, config = {}) {
     registerHooks(ctx, config);
   }
   if (config.enableMcp !== false) {
-    // Process-lifetime mount — deliberately NOT session-scoped (see src/mcp.js).
-    mountMcpServers(ctx, config).catch((error) => {
+    mountMcpForWorkspace(ctx, config, process.cwd()).catch((error) => {
       console.warn('dsh-claude-compat: MCP mount failed:', error?.message ?? error);
     });
-    if (config.enablePlugins !== false && config.enablePluginMcp === true) {
-      mountPluginMcp(ctx, config).catch((error) => {
-        console.warn('dsh-claude-compat: plugin MCP mount failed:', error?.message ?? error);
-      });
-    }
   }
 }
 
-// Opt-in: translate every installed plugin's MCP config and mount alongside
-// the project .mcp.json servers (see src/mcp.js mountMcpConfigs).
+// One-shot guard: a DSH host normally starts in a profile directory, so the
+// launch workspace has no project root. The first session then supplies the
+// real workspace and the project/user/local scopes mount from there — instead
+// of silently mounting nothing.
+let mcpSessionFallbackUsed = false;
+const mcpSessionMounted = new Set();
+
+/**
+ * Mount the MCP servers that apply to `cwd`, then the plugin-provided ones.
+ *
+ * Sequential on purpose: Claude Code's scope precedence (local > project > user
+ * > plugin) decides a name collision, not whichever async mount finished first.
+ */
+async function mountMcpForWorkspace(ctx, config, cwd) {
+  const result = await mountMcpServers(ctx, config, { cwd });
+  if (result.projectRoot === undefined && !mcpSessionFallbackUsed) {
+    mcpSessionFallbackUsed = true;
+    ctx.on('agent/created', (carrier, name, payload) => {
+      const agent = carrier?.agent ?? payload?.agent;
+      const sessionCwd = agent?.session?.header?.cwd;
+      if (typeof sessionCwd !== 'string' || sessionCwd.length === 0) return;
+      if (mcpSessionMounted.has(sessionCwd)) return;
+      mcpSessionMounted.add(sessionCwd);
+      mountMcpForWorkspace(ctx, config, sessionCwd).catch((error) => {
+        console.warn('dsh-claude-compat: MCP mount for session workspace failed:', error?.message ?? error);
+      });
+    });
+  }
+  if (config.enablePlugins !== false && config.enablePluginMcp === true) {
+    await mountPluginMcp(ctx, config);
+  }
+  return result;
+}
+
+// Translate every installed plugin's MCP config and mount alongside the
+// higher-precedence scopes. A plugin without a readable manifest is still
+// scanned (its conventional `<installPath>/.mcp.json` is what most ship).
 async function mountPluginMcp(ctx, config) {
   for (const plugin of readInstalledClaudePlugins(config.pluginsRoot)) {
     const raw = await readTextSafe(join(plugin.installPath, '.claude-plugin', 'plugin.json'));
-    if (raw === undefined) continue;
-    let manifest;
-    try { manifest = JSON.parse(raw); } catch { continue; }
+    let manifest = {};
+    if (raw !== undefined) {
+      try { manifest = JSON.parse(raw) ?? {}; } catch { manifest = {}; }
+    }
     const { servers, warns } = translatePluginMcp(manifest, plugin.installPath, {
       failOnStartupError: config.mcpFailOnStartupError ?? false,
+      // Claude Code namespaces plugin servers (`plugin_<plugin>_<server>`) so
+      // permission rules and hook matchers written for it keep matching.
+      pluginName: plugin.name,
     });
     warns.forEach((w) => console.warn(`dsh-claude-compat: plugin ${plugin.key}: ${w}`));
     if (servers.length > 0) await mountMcpConfigs(ctx, servers);
@@ -317,6 +355,9 @@ class ClaudeCompatSkillProvider {
       // defeat the cache entirely.)
       if (locator.invalidate) {
         try { this.control?.invalidate?.(); } catch { /* best-effort */ }
+        // Hook configs are cached per workspace; a reload must pick up newly
+        // installed plugins and edited settings files too.
+        try { invalidateHookCache(); } catch { /* best-effort */ }
       }
       return {
         name: candidate.name,
@@ -337,6 +378,9 @@ class ClaudeCompatSkillProvider {
       content = renderAgentContent(candidate, (parsed?.body ?? raw).trim());
     } else {
       content = parsed === undefined ? raw.trim() : parsed.body.trim();
+    }
+    if (candidate.hasArguments === true) {
+      content = `${argumentsNotice(candidate.argumentHint)}\n\n${content}`;
     }
     return {
       name: candidate.name,
@@ -405,13 +449,26 @@ export async function discoverCommands(rootDir, providerName, source, rank, alia
     const raw = await readTextSafe(path);
     if (raw === undefined) continue;
     const parsed = parseFrontmatter(raw);
-    const baseDescription = parsed === undefined ? stem : (stringField(parsed.data, 'description') ?? stem);
+    const data = parsed?.data ?? {};
+    let invocation;
+    try {
+      invocation = parsed === undefined ? { modelInvocable: true, userInvocable: true } : parseInvocationPolicy(data);
+    } catch {
+      invocation = { modelInvocable: true, userInvocable: true };
+    }
+    const argumentHint = stringField(data, 'argument-hint');
+    const baseDescription = parsed === undefined ? stem : (stringField(data, 'description') ?? stem);
     out.push({
       name: resolved.name,
       description: aliasOptions?.tagOriginal === false
-        ? baseDescription
-        : withOriginalName(baseDescription, resolved.original),
-      invocation: { modelInvocable: true, userInvocable: true },
+        ? (argumentHint === undefined ? baseDescription : `${baseDescription} (args: ${argumentHint})`)
+        : withOriginalName(argumentHint === undefined ? baseDescription : `${baseDescription} (args: ${argumentHint})`, resolved.original),
+      invocation,
+      // DSH's skill tool has no argument channel, so a command body that uses
+      // `$ARGUMENTS`/`$1` cannot be filled in. Mark the candidate so get() can
+      // tell the model where to read the arguments instead of leaking the
+      // literal placeholder into the instructions.
+      ...(/\$ARGUMENTS|\$[0-9]/.test(raw) ? { hasArguments: true, argumentHint } : {}),
       provider: providerName,
       source,
       rank,
@@ -427,9 +484,14 @@ async function parseSkillCandidateFile(path, providerName, source, rank, flatNam
   const raw = await readTextSafe(path);
   if (raw === undefined) return undefined;
   const parsed = parseFrontmatter(raw);
-  if (parsed === undefined) return undefined;
-  const fmName = stringField(parsed.data, 'name');
-  const description = stringField(parsed.data, 'description');
+  const fmName = parsed === undefined ? undefined : stringField(parsed.data, 'name');
+  const body = parsed === undefined ? raw : parsed.body;
+  // Claude Code loads a skill without a description (it falls back to the body),
+  // so dropping it here silently removed real skills.
+  const description = (parsed === undefined ? undefined : stringField(parsed.data, 'description'))
+    ?? firstBodyLine(body)
+    ?? fmName
+    ?? flatName;
   if (description === undefined) return undefined;
   // Prefer frontmatter name when it is a valid kebab-case skill name. Some Claude
   // skills use names with ':' or other chars DSH rejects (e.g.
@@ -445,7 +507,9 @@ async function parseSkillCandidateFile(path, providerName, source, rank, flatNam
   let invocation;
   try { invocation = parseInvocationPolicy(parsed.data); }
   catch { invocation = { modelInvocable: true, userInvocable: true }; }
-  const whenToUse = stringField(parsed.data, 'whenToUse');
+  // Claude Code writes `when_to_use` (snake_case) in frontmatter; the camelCase
+  // spelling was the only one read, so the field silently never applied.
+  const whenToUse = stringField(parsed?.data ?? {}, 'when_to_use') ?? stringField(parsed?.data ?? {}, 'whenToUse');
   return {
     name: resolved.name,
     description: aliasOptions?.tagOriginal === false
@@ -555,6 +619,31 @@ function parseInvocationPolicy(data) {
     modelInvocable: !truthy(miv),
     userInvocable: uiv === undefined ? true : truthy(uiv),
   };
+}
+
+/** First non-empty line of a markdown body, used as a description fallback. */
+function firstBodyLine(body) {
+  if (typeof body !== 'string') return undefined;
+  for (const line of body.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '' || trimmed === '---') continue;
+    return trimmed.length > 200 ? `${trimmed.slice(0, 200)}…` : trimmed;
+  }
+  return undefined;
+}
+
+/**
+ * DSH's skill tool takes only a name, so a Claude Code command's `$ARGUMENTS`
+ * placeholders cannot be substituted. Rather than leaking the literal token,
+ * the body is prefixed with where the arguments actually are.
+ */
+function argumentsNotice(argumentHint) {
+  const hint = typeof argumentHint === 'string' && argumentHint.length > 0
+    ? `Expected arguments: ${argumentHint}.`
+    : 'This command expects arguments.';
+  return `> **Arguments**: ${hint} Write them in your message after the command; `
+    + 'any `$ARGUMENTS` / `$1` placeholders below refer to that text. '
+    + 'If the message carries none, ask for them instead of guessing.';
 }
 
 function truthy(v) {

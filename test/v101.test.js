@@ -73,12 +73,14 @@ test('an absent manifest scans the conventional directories', () => {
   assert.equal(pluginCommandsDir(undefined, at), join(at, 'commands'));
 });
 
-test('a declared skills field wins over the convention', () => {
+test('a declared skills field ADDS to the conventional skills/ scan', () => {
+  // Claude Code appends a manifest's directories to the standard `skills/`
+  // scan; replacing it dropped skills the plugin added to `skills/` later.
   const at = '/plugins/cache/ui-ux-pro-max-skill/ui-ux-pro-max/2.5.0';
   assert.deepEqual(pluginSkillDirs({ skills: './.claude/skills/ui-ux-pro-max' }, at),
-    [join(at, '.claude/skills/ui-ux-pro-max')]);
+    [join(at, 'skills'), join(at, '.claude/skills/ui-ux-pro-max')]);
   assert.deepEqual(pluginSkillDirs({ skills: ['./skills/a', './skills/b'] }, at),
-    [join(at, 'skills/a'), join(at, 'skills/b')]);
+    [join(at, 'skills'), join(at, 'skills/a'), join(at, 'skills/b')]);
 });
 
 test('a declared commands field wins; an absent one means <installPath>/commands', () => {
@@ -89,7 +91,7 @@ test('a declared commands field wins; an absent one means <installPath>/commands
 
 // ----------------------------------------------------- installed_plugins.json
 
-test('only user-scope install records are surfaced (project/local scopes are skipped)', () => {
+test('every scope is surfaced; a user record wins over a local one', () => {
   const root = tmp();
   writeFileSync(join(root, 'installed_plugins.json'), JSON.stringify({
     version: 2,
@@ -103,9 +105,11 @@ test('only user-scope install records are surfaced (project/local scopes are ski
     },
   }));
   const got = readInstalledClaudePlugins(root);
-  assert.deepEqual(got.map((p) => p.name).sort(), ['claude-mem', 'multica-cli']);
+  // A plugin installed for one project only (`hyperframes`) is still installed;
+  // dropping it lost the whole plugin.
+  assert.deepEqual(got.map((p) => p.name).sort(), ['claude-mem', 'hyperframes', 'multica-cli']);
   assert.equal(got.find((p) => p.name === 'multica-cli').installPath, join(root, 'mu'),
-    'last user record wins over the local one');
+    'a user record wins over a local one');
 });
 
 // --------------------------------------------------------------- integration

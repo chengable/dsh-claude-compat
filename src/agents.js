@@ -50,6 +50,11 @@ export async function discoverAgents(rootDir, providerName, source, rank, aliasO
       ? baseDescription
       : withOriginalName(baseDescription, resolved.original);
     const tools = stringField(data, 'tools');
+    // Claude Code agents declare a model and an optional skills allow-list;
+    // both were dropped, so a 42/47-majority real-world field never reached the
+    // model. They ride on the delegation header instead.
+    const model = stringField(data, 'model');
+    const skills = stringField(data, 'skills');
     out.push({
       name: resolved.name,
       description,
@@ -62,6 +67,8 @@ export async function discoverAgents(rootDir, providerName, source, rank, aliasO
       resourceBase: { kind: 'directory', path: rootDir },
       path,
       agentTools: tools,
+      ...(model !== undefined ? { agentModel: model } : {}),
+      ...(skills !== undefined ? { agentSkills: skills } : {}),
     });
   }
   return out;
@@ -78,7 +85,9 @@ function firstLine(body, max) {
 // Render the content the skill tool returns for an agent-backed candidate.
 export function renderAgentContent(candidate, body) {
   const lines = [AGENT_HEADER];
+  if (candidate.agentModel !== undefined) lines.push(`Model: ${candidate.agentModel}`);
   if (candidate.agentTools !== undefined) lines.push(`Tools: ${candidate.agentTools}`);
+  if (candidate.agentSkills !== undefined) lines.push(`Skills: ${candidate.agentSkills}`);
   lines.push('');
   lines.push(body);
   return lines.join('\n');

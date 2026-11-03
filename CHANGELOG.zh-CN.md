@@ -4,6 +4,28 @@
 
 本项目所有重要变更记录于此。版本遵循 [SemVer](https://semver.org/)。
 
+## [1.1.0] — 2026-11-03
+
+### 新增
+- **Claude Code hooks 现在原生运行，不需要再装第二个插件。** 桥接 DSH 有接缝的全部九个事件：`SessionStart`（注入上下文）、`UserPromptSubmit`（拦截 / 追加上下文）、`PreToolUse`（deny / ask）、`PostToolUse` 与 `PostToolUseFailure`（拦截 / 追加上下文）、`Stop`（强制继续）、`SubagentStart` / `SubagentStop`、`SessionEnd`。来源包括 `~/.claude/settings.json`、`<项目>/.claude/settings.json`、`<项目>/.claude/settings.local.json`，以及每个已安装插件的 `hooks/hooks.json`（或其 manifest `hooks` 字段声明的文件）—— 插件 hooks 此前完全不可见，这也是 claude-mem 这类插件在这里从来跑不起来的原因。插件 hook 的 `${CLAUDE_PLUGIN_ROOT}` 会被替换，并导出给子进程。
+- **hook 语义对齐 Claude Code。** payload 带齐真实字段（`session_id`、`transcript_path`、`cwd`、`hook_event_name` 及各事件字段）与结尾换行；命令在会话工作目录运行并导出 `CLAUDE_PROJECT_DIR`；matcher 用 Claude 的规则（纯单词与 `|` 视为字面量或，其余按非锚定正则）；决策映射与参考实现一致（exit 2 拦截且 stderr 作为原因、`hookSpecificOutput.permissionDecision` 取 allow/deny/ask、`additionalContext` 注入、`continue: false` 停止、`async: true` 分离执行）。`Notification`、`PreCompact`、`Setup` 没有对应接缝，会被明确报告而不是静默丢弃。
+- **MCP：完整的 Claude Code 作用域层级。** 依次收集 local（`~/.claude.json` → `projects[<路径>].mcpServers`）、project（`.mcp.json`）、user（`~/.claude.json` → `mcpServers`）与插件 server，并按 Claude Code 的优先级合并（高作用域整条覆盖）。插件 server 命名空间为 `plugin_<插件>_<server>`，这样为 Claude Code 写的 permission 规则与 hook matcher 仍能对上。
+
+### 修复
+- **桌面版里项目级 hooks 与 `.mcp.json` 一直静默不可见。** 两者都从 `process.cwd()` 解析，而 DSH 宿主是从 profile 目录启动的 —— 于是项目的 `.claude/settings.json` 与 `.mcp.json` 永远找不到，且没有任何日志。现在两者都从**会话工作目录**解析；启动时没有会话则由第一个会话补上。
+- **hook 配置按工作区读取并缓存**，`/reload-cc-plugins` 会失效缓存；改 settings 或装插件不再需要重启进程才能看到（此前只在激活时读一次）。
+- **MCP 变量展开**：`${VAR}`、`${VAR:-default}`、`${CLAUDE_PROJECT_DIR}`、`${CLAUDE_PLUGIN_ROOT}`、`${CLAUDE_PLUGIN_DATA}` 会在 command/args/env/url/headers 中展开，并带 Claude Code 的防护：远程 url/headers 里的凭证类变量读为空。manifest 内联 `mcpServers` 此前整条绕过了替换（与 1.0.2 起的 CHANGELOG 承诺相反）。
+- **此前被忽略的 MCP 字段**：`timeout`（原来硬编码 60 秒）、`disabled`，以及 DSH 没有的传输 —— `ws`/`sdk` 告警后跳过，旧 `sse` 告警后按 streamable-http 挂载，`url` 没写 `type` 会告警而不是静默挂载。
+- **MCP 冲突变确定**：模块级挂载登记表 + 串行挂载，取代两路不 await 的并发挂载，项目 server 与插件 server 不会再重复注册同名；超长 server 名截断时带哈希，避免两个长名撞成同一个。
+- **插件 `commands` 数组形态此前被忽略** —— 一个真实插件声明 `["./.claude/commands", "./commands"]`，导致它 8 个命令全丢。现在 skills/commands/agents 都支持数组；manifest 的 `skills` 字段改为**追加**到约定的 `skills/` 扫描，而不是替换。
+- **`enabledPlugins: false` 生效**，`/cc-plugin disable` 现在真的会禁用插件（技能、命令、agent、hooks、MCP server 全部）；只有 project 作用域安装记录的插件也不再被丢弃。
+- **`.claude/commands` 现在遵循 `disable-model-invocation` 与 `argument-hint`**；使用 `$ARGUMENTS` 的命令会说明参数该写在哪，而不是把字面占位符漏给模型。
+- **没有 `description` 的技能不再被丢弃**（用正文首行作描述，与 Claude Code 一致），并同时读取 `when_to_use` 与 `whenToUse`。
+- **`.claude/agents` 不再只有正文**：委派头里带上 agent 的 `model`、`tools`、`skills`。
+
+### 测试
+- 新增 `test/v110.test.js`（hooks：来源、插件发现、工作区解析、payload、解码、合并）、`test/v111.test.js`（MCP：变量展开、传输、作用域、优先级、命名空间）、`test/v112.test.js`（插件组件、`enabledPlugins`、命令参数、agent 头）。套件共 96 项，全部通过。
+
 ## [1.0.4] — 2026-11-03
 
 ### 测试

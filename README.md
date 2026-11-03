@@ -117,7 +117,8 @@ Restart DSH (`dsh web`). Done — skills show up in `/`, rules are injected into
 | `enableRules` | `true` | Inject project + `~/.claude` `rules/*.md` into the message stream |
 | `enableMcp` | `true` | Translate `<projectRoot>/.mcp.json` into mounted MCP server plugins |
 | `mcpFailOnStartupError` | `false` | Forward to `dsh-mcp-client`: fail plugin startup when an MCP server fails to connect |
-| `enableHooks` | `true` | Run `.claude/settings.json` hooks (Pre/PostToolUse, UserPromptSubmit) |
+| `enableHooks` | `true` | Run Claude Code hooks (settings files, and every installed plugin's `hooks/hooks.json`) |
+| `enablePluginHooks` | `true` | Run the hooks that installed Claude Code plugins ship (set `false` for settings-file hooks only) |
 | `hooksTimeoutMs` | `60000` | Per-hook run timeout (UserPromptSubmit capped at 10s regardless) |
 | `enableAgents` | `true` | Surface `.claude/agents/*.md` as delegation-shim skills |
 | `skillAliases` | `{}` | Non-kebab (e.g. Chinese) name → ASCII slug map, e.g. `{ "三脑": "san-nao" }`. See “Non-ASCII skill names” below |
@@ -141,8 +142,10 @@ Restart DSH (`dsh web`). Done — skills show up in `/`, rules are injected into
 ## Notes
 
 - **Skill naming**: DSH requires kebab-case skill names. Nested skill directories are flattened (`gitnexus/gitnexus-guide` → `gitnexus-gitnexus-guide`); invalid frontmatter names fall back to the directory name.
-- **MCP lifecycle**: `.mcp.json` is read once at DSH startup from the launch workspace — not per session — and each server mounts for the process lifetime. Restart DSH to pick up edits.
-- **Hooks scope**: a deliberately small subset of Claude Code hooks: PreToolUse / PostToolUse / UserPromptSubmit. Matchers support exact names, `*` wildcards, and `|` alternation; commands run with `stdin` carrying the Claude-style JSON payload. Exit code 2 = deny (Pre) / block (Post); other non-zero exits and timeouts allow through with a warning.
+- **MCP sources**: the full Claude Code hierarchy is read, highest precedence first — local (`~/.claude.json` → `projects[<path>].mcpServers`), project (`<root>/.mcp.json`), user (`~/.claude.json` → `mcpServers`), then plugin servers (namespaced `plugin_<plugin>_<server>`). A higher scope wins the whole entry on a name collision. `${VAR}`, `${VAR:-default}`, `${CLAUDE_PROJECT_DIR}`, `${CLAUDE_PLUGIN_ROOT}` are expanded; `timeout` and `disabled` are honored; `ws`/`sdk` servers are skipped with a warning and legacy `sse` mounts as streamable-http. Edits still need a DSH restart (mounts are process-lifetime).
+- **MCP workspace**: the project scope resolves from the session workspace, because a DSH host runs from a profile directory. When no project root is known at startup, the first session supplies it.
+- **Hooks**: all nine events DSH has a seam for run natively — `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `SubagentStart`, `SubagentStop`, `SessionEnd` — from `~/.claude/settings.json`, `<project>/.claude/settings.json`, `<project>/.claude/settings.local.json`, and each installed plugin's `hooks/hooks.json` (or the files its manifest `hooks` field names). Matchers follow Claude Code: a word-and-`|` pattern is a literal alternation, anything else is an unanchored regex, `''`/`*` match all. Commands get the Claude-shaped JSON payload on stdin (trailing newline), run in the session workspace with `CLAUDE_PROJECT_DIR` (and `CLAUDE_PLUGIN_ROOT` for plugin hooks) exported. Decisions: exit 2 blocks (stderr is the reason), `hookSpecificOutput.permissionDecision` is `allow`/`deny`/`ask`, `additionalContext` is injected, `async: true` hooks run detached. `Notification`, `PreCompact` and `Setup` have no DSH seam and are reported once.
+- **Hooks workspace**: project hook configs resolve from the session workspace (not the process cwd), so they work in the desktop app too. `/reload-cc-plugins` refreshes the cache after installing or editing plugins.
 - **Rules granularity**: rules are read per new session (cached per session cwd). Editing a rule mid-session takes effect in the next session.
 - **Rules content**: rules are injected verbatim as instructions to the model. Only commit rules you want the model to follow — same trust level as `CLAUDE.md`.
 - **Catalog snapshot timing**: the skill catalog is snapshotted when a session is created. Skills installed or edited mid-session surface after `/reload-cc-plugins` (hot reload) or in the next session.
@@ -163,6 +166,33 @@ skillAliases:
 - **A legal name always beats an alias** — a skill DSH can already load is never renamed.
 - Aliased entries keep their provider's rank, so a collision with a DSH-native or `~/.agents` skill is deduped exactly like any other duplicate (a `~/.claude` alias loses to an `~/.agents` skill of the same name rather than shadowing it). Lower `userSkillRank` below 500 to make `~/.claude` win.
 - Un-mapped non-kebab names no longer vanish silently: one warning per file per process, with a paste-ready mapping example.
+
+## Known limitations
+
+Features Claude Code has that this bridge cannot provide, because the running DSH
+has no surface for them. Documented so they are not mistaken for bugs:
+
+- **`$ARGUMENTS` / `$1` / `$N` in commands and skills.** DSH's `skill` tool takes
+  only a name — there is no argument channel. The body is prefixed with a note
+  telling the model that arguments are whatever the user wrote in their message,
+  and the command's `argument-hint` is appended to the description. Real argument
+  interpolation would need the command to be registered as a native DSH command.
+- **`plugin:skill` namespaces.** DSH names cannot contain `:`, so plugin content
+  is surfaced under its bare name with a `[plugin-name]` description prefix.
+- **Plugin `hooks`/`mcpServers` in the new in-process "mods" format.** This
+  bridge runs classic command hooks and MCP configs only.
+- **Hook events without a DSH seam**: `Notification`, `PreCompact`, `Setup`.
+- **MCP transports DSH lacks**: legacy SSE (mounted as streamable-http with a
+  warning), WebSocket and `sdk` (skipped with a warning), OAuth and
+  `headersHelper` (use a static `headers` token instead).
+- **Execution prefixes** `!`cmd`` for commands, `@file` references,
+  `allowed-tools`/`disallowed-tools`, per-skill `model`/`effort`, `context: fork`
+  and `paths` — none has a DSH field to carry them.
+- **Catalog description width**: long descriptions are truncated by DSH's catalog
+  rendering (several bundled skills already exceed it).
+- **Agent execution semantics**: `.claude/agents/*.md` become delegation-shim
+  skills. The agent's `model`, `tools` and `skills` are surfaced in the
+  delegation header rather than enforced as a runtime preset.
 
 ## Troubleshooting
 

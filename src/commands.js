@@ -16,6 +16,7 @@
 import { execFile } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { invalidateHookCache } from './hooks.js';
 import { promisify } from 'node:util';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { runPluginCommand } from './plugin-manager.js';
@@ -90,6 +91,7 @@ export function registerManagerCommands(ctx, config, getProvider) {
     ctx.inject(['commands'], (commandCtx) => {
       const reloadHandler = async () => {
         try { getProvider()?.control?.invalidate?.(); } catch { /* best-effort */ }
+        try { invalidateHookCache(); } catch { /* best-effort */ }
         return { kind: 'success', text: RELOAD_DONE };
       };
       const defs = [
