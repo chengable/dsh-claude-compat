@@ -1,3 +1,9 @@
 node_modules/
 .npmrc
 *.tgz
+
+# Runtime state written by Claude Code plugin hooks while a session runs.
+# These are per-machine, per-session side effects (claude-evol counters/flags,
+# agent-morph workflow state) — never source. `git add -A` used to sweep them in.
+.claude/.claude-evol/
+.agent-morph-state.json
