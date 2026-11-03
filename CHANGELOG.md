@@ -4,6 +4,11 @@ English | [简体中文](CHANGELOG.zh-CN.md)
 
 All notable changes to this project are documented here. Versions follow [SemVer](https://semver.org/).
 
+## [1.1.3] — 2026-11-03
+
+### Fixed
+- **A Stop-hook notice now appears at the end of its own turn.** The notice was buffered until the next prompt, so (a) it needed a second message before it became visible and (b) a restart in between discarded it — the queue lived only in the process. It is now appended straight to the session surface (`surfaceOp: 'append'`, the same call DSH uses for runtime context), with the buffer kept only as a fallback for sessions that cannot take an append.
+
 ## [1.1.2] — 2026-11-03
 
 ### Fixed

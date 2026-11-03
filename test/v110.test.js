@@ -387,3 +387,38 @@ test('wiring: notice text is stripped of terminal color codes', async () => {
   const text = (d.messages ?? []).flatMap((m) => m.content.map((c) => c.text)).join('');
   assert.equal(text, '🧬 colored notice', 'escape sequences are stripped before display');
 });
+
+test('wiring: a Stop notice is appended to the session immediately when possible', async () => {
+  // Restarting wipes an in-memory queue, so the notice must land in THIS turn.
+  const project = sandbox('dcc-notice-now-');
+  mkdirSync(join(project, '.git'));
+  writeJson(join(project, '.claude', 'settings.json'), {
+    hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo \'{"systemMessage":"threshold reached"}\'' }] }] },
+  });
+  const listeners = new Map();
+  const appended = [];
+  registerHooks({ on: (n, f) => { listeners.set(n, f); return () => {}; }, get: () => undefined },
+    { userClaudeDir: join(project, 'nouser'), pluginsRoot: join(project, 'noplugins') });
+  invalidateHookCache();
+
+  const agent = {
+    session: {
+      header: { id: 'session-now', cwd: project },
+      append: (type, message, opts) => { appended.push({ type, message, opts }); return {}; },
+    },
+  };
+  await listeners.get('agent/turn-stopping')({ agent, turn: 1, signal: new AbortController().signal });
+
+  assert.equal(appended.length, 1, 'appended at the turn boundary, not deferred');
+  assert.equal(appended[0].type, 'user/message');
+  assert.deepEqual(appended[0].opts, { surfaceOp: 'append' });
+  assert.equal(appended[0].message.source.form, 'notice');
+  assert.equal(appended[0].message.content[0].text, 'threshold reached');
+
+  // And it must NOT also be queued for the next prompt.
+  const next = await listeners.get('agent/pre-step')(
+    { agent, messages: [{ content: [{ type: 'text', text: 'hi' }] }] },
+    async () => ({ kind: 'enter', messages: [] }),
+  );
+  assert.deepEqual(next.messages, [], 'no duplicate delivery on the next prompt');
+});

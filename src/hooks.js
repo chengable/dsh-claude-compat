@@ -662,6 +662,35 @@ export function registerHooks(ctx, config) {
     source: { kind: CLAUDE_COMPAT_SOURCE_KIND, form: 'notice', summary: text.slice(0, 160) },
   }));
 
+  /**
+   * Append a notice straight to the session surface — the same call DSH itself
+   * uses for runtime context — so it shows up at the end of THIS turn. Without
+   * it a notice waits for the next prompt and dies with the process on restart.
+   * Returns false when the session cannot take the append (then we fall back).
+   */
+  const appendNoticeNow = (agent, texts) => {
+    if (config.surfaceHookOutput === false || texts.length === 0) return false;
+    const session = agent?.session;
+    if (typeof session?.append !== 'function') return false;
+    let appended = false;
+    for (const raw of texts) {
+      const text = stripAnsi(raw);
+      if (text.trim() === '') continue;
+      try {
+        session.append('user/message',
+          createUserMessage({
+            content: [{ type: 'text', text }],
+            source: { kind: CLAUDE_COMPAT_SOURCE_KIND, form: 'notice', summary: text.slice(0, 160) },
+          }),
+          { surfaceOp: 'append' });
+        appended = true;
+      } catch {
+        return false;
+      }
+    }
+    return appended;
+  };
+
   const queueNotices = (agent, texts) => {
     if (config.surfaceHookOutput === false || texts.length === 0) return;
     const key = agentSessionId(agent);
@@ -745,8 +774,11 @@ export function registerHooks(ctx, config) {
     const agent = event?.agent;
     const { merged } = await runEvent('Stop', '', (cwd) => stopPayload(agent, cwd), agent);
     // A Stop hook's stdout is a user-facing note in Claude Code (e.g. claude-evol's
-    // review-threshold reminder). Hand it to the next prompt.
-    queueNotices(agent, merged.messages ?? []);
+    // review-threshold reminder). Show it now; only buffer it when the session
+    // cannot take an append.
+    if (!appendNoticeNow(agent, merged.messages ?? [])) {
+      queueNotices(agent, merged.messages ?? []);
+    }
     if (merged.decision === 'deny' || merged.stop === true) {
       const text = merged.reason ?? merged.stopReason ?? 'continue: blocked by Stop hook';
       if (typeof agent?.steer === 'function') {
