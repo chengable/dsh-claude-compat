@@ -123,8 +123,16 @@ test('translatePluginMcp: manifest mcpServers path → server configs, ${CLAUDE_
   assert.equal(servers[0].command, 'node');
   assert.deepEqual(servers[0].args, [join(root, 'bridge/server.cjs')]);
 
-  // no mcpServers / unreadable → empty
-  assert.deepEqual(translatePluginMcp({ name: 'x' }, root), { servers: [], warns: [] });
+  // Since v1.0.2 an absent mcpServers falls back to the conventional
+  // <installPath>/.mcp.json, which this sandbox has — so the same bridge server
+  // is found without the manifest pointing at it.
+  const conventional = translatePluginMcp({ name: 'x' }, root);
+  assert.equal(conventional.servers.length, 1);
+  assert.equal(conventional.servers[0].serverName, 'bridge');
+  assert.equal(conventional.servers[0].args[0], join(root, 'bridge/server.cjs'));
+  // A plugin with no MCP config anywhere stays empty and silent.
+  assert.deepEqual(translatePluginMcp({ name: 'x' }, makeSandbox('dcc-pmcp-none-')),
+    { servers: [], warns: [] });
   const missing = translatePluginMcp({ name: 'x', mcpServers: './nope.json' }, root);
   assert.equal(missing.servers.length, 0);
   assert.ok(missing.warns.length > 0);

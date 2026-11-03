@@ -4,6 +4,14 @@ English | [简体中文](CHANGELOG.zh-CN.md)
 
 All notable changes to this project are documented here. Versions follow [SemVer](https://semver.org/).
 
+## [1.0.2] — 2026-11-03
+
+### Fixed
+- **Plugin MCP servers are discovered in every layout Claude Code accepts.** `translatePluginMcp()` only understood a manifest `mcpServers` that was a *path string*; any other shape produced zero servers and zero warnings. Most marketplace plugins keep their servers in a separate `<installPath>/.mcp.json` (claude-mem's `mcp-search` is exactly that), and an inline `mcpServers` map is equally valid — both were dropped, so `enablePluginMcp: true` mounted nothing. Resolution order is now: inline object → path string → conventional `<installPath>/.mcp.json`, with `${CLAUDE_PLUGIN_ROOT}` substituted in every case. A malformed `mcpServers` value and an unreadable declared path now warn instead of disappearing; a plugin with no MCP config anywhere still resolves quietly to zero servers.
+
+### Tests
+- `test/v102.test.js`: the claude-mem layout (manifest without `mcpServers` + `./.mcp.json`), inline object, path string precedence, `${CLAUDE_PLUGIN_ROOT}` substitution, unreadable path warning, malformed value warning, and the authoritative empty map.
+
 ## [1.0.1] — 2026-11-03
 
 ### Fixed

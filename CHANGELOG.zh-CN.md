@@ -4,6 +4,14 @@
 
 本项目所有重要变更记录于此。版本遵循 [SemVer](https://semver.org/)。
 
+## [1.0.2] — 2026-11-03
+
+### 修复
+- **插件 MCP server 现在按 Claude Code 支持的全部三种写法发现。** `translatePluginMcp()` 此前只认 manifest 里 `mcpServers` 为**路径字符串**的写法；其它形态一律产出 0 个 server、0 条告警。而多数市场上插件把 server 写在独立的 `<installPath>/.mcp.json` 里（claude-mem 的 `mcp-search` 正是如此），内联 `mcpServers` 对象同样合法 —— 两种都被丢弃，于是 `enablePluginMcp: true` 实际上什么都没挂上。现在的解析顺序是：内联对象 → 路径字符串 → 约定文件 `<installPath>/.mcp.json`，三种情况都会替换 `${CLAUDE_PLUGIN_ROOT}`。畸形的 `mcpServers` 值、以及声明了但读不到的路径，现在会告警而不是静默消失；完全没有 MCP 配置的插件仍然安静地解析为 0 个 server。
+
+### 测试
+- 新增 `test/v102.test.js`：覆盖 claude-mem 那种布局（manifest 无 `mcpServers` + 独立 `./.mcp.json`）、内联对象、路径字符串优先级、`${CLAUDE_PLUGIN_ROOT}` 替换、路径不可读告警、畸形值告警，以及显式空表。
+
 ## [1.0.1] — 2026-11-03
 
 ### 修复

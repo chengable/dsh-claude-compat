@@ -191,16 +191,43 @@ export function pluginCommandsDir(manifest, installPath) {
   return join(installPath, 'commands');
 }
 
-// Translate a plugin's MCP config into dsh-mcp-client server configs. Returns
-// { servers, warns } (empty when no/invalid mcpServers field). Substitutes the
-// ${CLAUDE_PLUGIN_ROOT} placeholder Claude Code defines for plugin processes.
+/**
+ * Translate one plugin's MCP configuration into dsh-mcp-client server configs.
+ *
+ * Claude Code accepts three shapes; this bridge used to understand only the
+ * middle one — a manifest `mcpServers` that is a path string:
+ *
+ *   1. `"mcpServers": { … }`         inline map inside `.claude-plugin/plugin.json`
+ *   2. `"mcpServers": "./mcp.json"`  path string, resolved against the plugin root
+ *   3. no `mcpServers` field at all  → the conventional `<installPath>/.mcp.json`
+ *
+ * Shape 3 is what most marketplace plugins ship — claude-mem keeps its
+ * `mcp-search` server there — so treating an absent field as "no servers"
+ * mounted nothing at all, with no warning. Only a plugin with no MCP config
+ * anywhere resolves to zero servers *and* zero warnings.
+ */
 export function translatePluginMcp(manifest, installPath, opts = {}) {
   const ref = manifest?.mcpServers;
-  if (typeof ref !== 'string') return { servers: [], warns: [] };
-  const raw = readTextSafeSync(resolve(installPath, ref));
-  if (raw === undefined) return { servers: [], warns: [`mcpServers file not readable: ${ref}`] };
-  const substituted = raw.replaceAll('${CLAUDE_PLUGIN_ROOT}', installPath);
-  return translateMcpServers(substituted, opts);
+  const fromText = (raw) => translateMcpServers(
+    raw.replaceAll('${CLAUDE_PLUGIN_ROOT}', installPath), opts);
+
+  if (typeof ref === 'object' && ref !== null && !Array.isArray(ref)) {
+    return translateMcpServers(JSON.stringify({ mcpServers: ref }), opts);
+  }
+  if (typeof ref === 'string') {
+    const raw = readTextSafeSync(resolve(installPath, ref));
+    if (raw === undefined) return { servers: [], warns: [`mcpServers file not readable: ${ref}`] };
+    return fromText(raw);
+  }
+  if (ref !== undefined) {
+    // Arrays / numbers / null: malformed, and worth saying so.
+    return { servers: [], warns: ['mcpServers: expected an object or a path string, skipped'] };
+  }
+  // Absent → convention: <installPath>/.mcp.json. A missing file is not a
+  // warning; it only means this plugin ships no MCP servers.
+  const raw = readTextSafeSync(join(installPath, '.mcp.json'));
+  if (raw === undefined) return { servers: [], warns: [] };
+  return fromText(raw);
 }
 
 function readTextSafeSync(p) { try { return rfs(p, 'utf8'); } catch { return undefined; } }
