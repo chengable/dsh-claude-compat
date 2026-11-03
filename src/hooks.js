@@ -615,6 +615,12 @@ export function registerHooks(ctx, config) {
         continue;
       }
       const { exitCode, stdout, stderr } = await run;
+      // Exit 2 is a deliberate block; exit 0 is success. Anything else is a
+      // broken hook — Claude Code surfaces it, and staying silent here would
+      // make a plugin whose hook started failing look like it still works.
+      if (exitCode !== 0 && exitCode !== 2) {
+        console.warn(`dsh-claude-compat: ${event} hook exited ${exitCode} (non-blocking): ${hook.command.slice(0, 120)}`);
+      }
       const decoded = decodeHookOutput({ exitCode, stdout, stderr }, event);
       // DSH logs the call before policy runs, so a rewritten input could not be
       // executed as logged; say so instead of pretending it applied.
