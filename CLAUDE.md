@@ -201,5 +201,5 @@ zstd -dc ~/.dsh/sessions/<munged>/session-<id>/session.v4.jsonl.zstd > /tmp/s.js
 
 - 内置的 `install-dsh-compat` skill 里写的仍是上游 `biedongbin/dsh-claude-compat` 地址；本 fork 安装应使用 `github:chengable/dsh-claude-compat#main`。
 - `package-lock.json` 的 `version` 停在 `1.0.0`（历次 bump 都没同步它），不代表发布状态。
-- npm 上仍是上游的 `1.0.0`，fork 的 `1.0.1`~`1.0.4` 未发布；市场索引由 npm registry 生成，所以 `site/index.json` 里的 author/homepage 还是上游 —— 不是 bug。
+- npm 上仍是上游的 `1.0.0`，fork 的 `1.0.1`~`1.1.0` 未发布；市场索引由 npm registry 生成，所以 `site/index.json` 里的 author/homepage 还是上游 —— 不是 bug。
 - [`docs/HANDOFF.md`](docs/HANDOFF.md) 是一次任务的交接文档，部分待办已过期；读之前先对一遍 `git log`。
